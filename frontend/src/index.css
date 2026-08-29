@@ -1,0 +1,230 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Noto Sans SC', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-heading: 'Outfit', sans-serif;
+
+  /* Brand colors: Premium warm gold/bronze and earthy accents (CC Switch style) */
+  --color-brand-cyan: #b08956;     /* Gold-bronze highlight */
+  --color-brand-blue: #8c7255;     /* Warm bronze-brown */
+  --color-brand-purple: #aa5d44;   /* Terracotta */
+  --color-brand-emerald: #5c8567;  /* Sage green */
+  --color-brand-amber: #c49942;    /* Amber */
+  --color-brand-rose: #ab4c4c;     /* Coral rose */
+
+  /* Semantic theme colors: prefer these names in shared layout and new components. */
+  --color-page: #faf7f2;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f4f0e6;
+  --color-border: #e2dac9;
+  --color-border-strong: #a89f8f;
+  --color-ink: #2d2922;
+  --color-body: #4a4238;
+  --color-muted: #706757;
+  --color-subtle: #8c8270;
+
+  /* Semantic compatibility shades used while old pages leave the inverted Slate scale. */
+  --color-ink-strong: #1a1815;
+  --color-body-strong: #3c372e;
+
+  /* Shared shape and elevation scale */
+  --radius-control: 0.625rem;
+  --radius-panel: 1rem;
+  --shadow-panel: 0 8px 28px rgba(74, 66, 56, 0.06);
+  --shadow-floating: 0 22px 64px rgba(74, 66, 56, 0.18);
+
+  /* Legacy compatibility only. Shared components and new code must use semantic colors above. */
+  --color-slate-50: #1a1815;       /* Darkest brown-charcoal */
+  --color-slate-100: #2d2922;      /* Deep warm text */
+  --color-slate-200: #3c372e;      /* Body text bold */
+  --color-slate-300: #4a4238;      /* Body text normal (optimized for readability) */
+  --color-slate-400: #706757;      /* Secondary text */
+  --color-slate-500: #8c8270;      /* Muted text */
+  --color-slate-600: #a89f8f;      /* Border highlight */
+  --color-slate-700: #e2dac9;      /* Light border color */
+  --color-slate-800: #f4f0e6;      /* Accent backgrounds (inputs, tabs, sidebar) */
+  --color-slate-900: #ffffff;      /* Solid white card panels */
+  --color-slate-950: #faf7f2;      /* Main page background cream */
+}
+
+/* Global Reset & Base Styling */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-page);
+  background-image:
+    radial-gradient(at 0% 0%, rgba(176, 137, 86, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(140, 114, 85, 0.04) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(176, 137, 86, 0.02) 0px, transparent 50%);
+  background-attachment: fixed;
+  font-family: var(--font-sans);
+  color: var(--color-body);
+  line-height: 1.65;
+}
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgba(176, 137, 86, 0.78);
+  outline-offset: 2px;
+}
+
+/* Custom Scrollbar in Warm Beige theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(143, 123, 102, 0.03);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(143, 123, 102, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(143, 123, 102, 0.25);
+}
+
+/* Glassmorphism Styles (CC Switch style) */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(143, 123, 102, 0.15);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel-hover:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(176, 137, 86, 0.35);
+  box-shadow: 0 10px 30px -10px rgba(176, 137, 86, 0.12);
+  transform: translateY(-2px);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(143, 123, 102, 0.1);
+  border-radius: 0.75rem;
+}
+
+.dialog-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.text-gradient-cyan-blue {
+  background: linear-gradient(135deg, #b08956 0%, #8c7255 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-purple-rose {
+  background: linear-gradient(135deg, #aa5d44 0%, #ab4c4c 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-emerald-cyan {
+  background: linear-gradient(135deg, #5c8567 0%, #b08956 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Form input styling */
+input, select, textarea {
+  outline: none;
+  background-color: var(--color-surface) !important;
+  color: var(--color-ink) !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+:where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']), select) {
+  min-height: 2.5rem;
+  border-radius: var(--radius-control) !important;
+}
+
+textarea {
+  border-radius: var(--radius-control) !important;
+}
+
+input[data-control-size='sm'] {
+  min-height: 2.25rem;
+}
+
+input::placeholder {
+  color: var(--color-subtle) !important;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(176, 137, 86, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(176, 137, 86, 0.15) !important;
+}
+
+input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='true'] {
+  border-color: rgba(171, 76, 76, 0.65) !important;
+  box-shadow: 0 0 0 2px rgba(171, 76, 76, 0.1) !important;
+}
+
+input:disabled, select:disabled, textarea:disabled,
+input[data-field-state='derived'] {
+  background-color: var(--color-surface-muted) !important;
+  color: var(--color-body) !important;
+}
+
+/* Force standard text-white classes to render in dark charcoal for high readability in light panels */
+.text-white {
+  color: var(--color-ink) !important;
+}
+
+/* Force actual white text for active elements, buttons, and brand badges */
+button.text-white,
+a.text-white,
+.bg-brand-cyan .text-white,
+.bg-gradient-to-r .text-white,
+.bg-brand-cyan .text-slate-200,
+.bg-brand-cyan .text-slate-300,
+button .text-slate-200,
+.text-white-force {
+  color: #ffffff !important;
+}
+
+
+
+
+/* Recharts tooltip styling for light theme */
+.recharts-default-tooltip {
+  background-color: #ffffff !important;
+  border-color: rgba(143, 123, 102, 0.15) !important;
+  box-shadow: 0 4px 12px rgba(143, 123, 102, 0.08) !important;
+}
+
+.recharts-tooltip-item {
+  color: var(--color-slate-100) !important;
+}
+
+/* Table hover */
+tr:hover {
+  background-color: rgba(176, 137, 86, 0.02) !important;
+}
+
+/* Animations */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

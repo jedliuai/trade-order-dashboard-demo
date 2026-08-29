@@ -1,0 +1,30 @@
+# Runtime and dependencies
+node_modules/
+.venv/
+dist/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets stay on this computer
+.env
+.env.*
+!.env.local.example
+*.env
+待处理.env
+*.local
+
+# Only fictional seed JSON belongs in Git
+data/*.sqlite*
+data/*.db*
+data/backups/
+
+# Tool outputs and private scratch files
+.superpowers/
+.playwright-cli/
+output/
+outputs/
+tmp/
+*.log
+frontend/.tmp-build*/

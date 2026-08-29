@@ -1,0 +1,3 @@
+# Standalone local demo; SQLite and HTTP use the Python standard library.
+openpyxl>=3.1.5,<4
+python-docx>=1.2.0,<2

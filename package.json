@@ -1,0 +1,20 @@
+{
+  "name": "trade-order-dashboard-demo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "完全本地运行的虚构外贸订单驾驶舱演示",
+  "scripts": {
+    "setup": "node scripts/local.mjs setup",
+    "dev": "node scripts/local.mjs dev",
+    "start": "node scripts/local.mjs start",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint",
+    "test": "npm run test:scripts && npm run test:frontend && npm run test:python",
+    "test:frontend": "npm --prefix frontend test",
+    "test:python": "node scripts/local.mjs test",
+    "test:scripts": "node --test scripts/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
