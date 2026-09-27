@@ -7,6 +7,8 @@ export const DEMO_ACCOUNTS = [
   { id: 'demo-owner', name: '公司负责人（演示）', role: 'leader' },
 ] as const;
 
+export const IS_PUBLIC_DEMO = import.meta.env?.VITE_PUBLIC_DEMO === 'true';
+
 const accountKey = 'trade-demo-account';
 export type DemoSession = {
   user: { id: string; email: string; app_metadata: { app_role: 'member' | 'leader'; login_name: string; display_name: string } };
@@ -29,7 +31,12 @@ export function setDemoAccount(id: string) {
 
 export function getCurrentAccountIdentity(session = getLocalSession()): AccountIdentity {
   const metadata = session.user.app_metadata;
-  return { loginName: metadata.login_name, displayName: metadata.display_name, role: metadata.app_role, isReadOnly: metadata.app_role === 'leader' };
+  return {
+    loginName: metadata.login_name,
+    displayName: metadata.display_name,
+    role: metadata.app_role,
+    isReadOnly: IS_PUBLIC_DEMO || metadata.app_role === 'leader'
+  };
 }
 
 export function isReadOnlySession(session = getLocalSession()) {
@@ -55,7 +62,9 @@ export async function localResponse(path: string, init: RequestInit = {}): Promi
   try { response = await fetch(url, { ...init, headers, credentials: 'same-origin' }); }
   catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    throw new Error('本地服务无法连接，请确认已运行 npm run dev 或 npm start。');
+    throw new Error(IS_PUBLIC_DEMO
+      ? '公网演示服务暂时无法连接，请刷新页面后重试。'
+      : '本地服务无法连接，请确认已运行 npm run dev 或 npm start。');
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));

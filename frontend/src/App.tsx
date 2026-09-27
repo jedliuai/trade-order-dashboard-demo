@@ -5,7 +5,7 @@ import { Header } from './components/Header';
 import { lazy, Suspense } from 'react';
 import { formatLocalMonth } from './services/dateUtils';
 import { LoaderCircle } from 'lucide-react';
-import { getCurrentAccountIdentity } from './services/localClient';
+import { getCurrentAccountIdentity, IS_PUBLIC_DEMO } from './services/localClient';
 import { loadCustomerDisplayOrder } from './services/customerOrdering';
 
 const loadDashboard = () => import('./pages/Dashboard');
@@ -160,7 +160,7 @@ function App() {
       case 'packaging_master_data': return '包装主数据';
       case 'alerts': return '异常风险通报';
       case 'exports': return '导出中心';
-      case 'settings': return '本地设置与汇报';
+      case 'settings': return IS_PUBLIC_DEMO ? '演示设置与汇报' : '本地设置与汇报';
       default: return '外贸个人驾驶舱';
     }
   };
@@ -215,12 +215,14 @@ function App() {
         <main className="mt-14 min-w-0 flex-1 overflow-y-auto p-6 2xl:p-8">
           {accountIdentity?.isReadOnly && (
             <div role="status" className="mb-5 rounded-lg border border-brand-cyan/25 bg-brand-cyan/10 px-4 py-3 text-xs text-brand-cyan">
-              当前为上级只读视图：可查看授权成员及合并汇总，不能新增、修改、删除或触发自动写库。
+              {IS_PUBLIC_DEMO
+                ? '当前为公网只读沙箱：可以切换虚构身份、浏览全部业务页面并下载演示报表；编辑、重置和实际消息发送已关闭。'
+                : '当前为上级只读视图：可查看授权成员及合并汇总，不能新增、修改、删除或触发自动写库。'}
             </div>
           )}
           {dataLoadError && (
             <div role="alert" className="mb-5 rounded-lg border border-brand-amber/25 bg-brand-amber/10 px-4 py-3 text-xs text-brand-amber">
-              本地数据提示：{dataLoadError}
+              演示数据提示：{dataLoadError}
             </div>
           )}
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted">正在加载业务页面…</div>}>

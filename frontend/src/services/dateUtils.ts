@@ -10,6 +10,10 @@ export function formatLocalMonth(date = new Date()): string {
 }
 
 export function formatChinaDate(date = new Date()): string {
+  const publicSnapshotDate = import.meta.env?.VITE_PUBLIC_DEMO_AS_OF_DATE;
+  if (publicSnapshotDate && /^\d{4}-\d{2}-\d{2}$/.test(publicSnapshotDate)) {
+    return publicSnapshotDate;
+  }
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Database, Download, RefreshCw, Send, ShieldCheck, ArrowRightLeft, Trash2 } from 'lucide-react';
 import { db, initDataStore } from '../services/dataStore';
-import { localRequest, downloadLocalFile, getCurrentAccountIdentity, DEMO_ACCOUNTS, getLocalSession, setDemoAccount } from '../services/localClient';
+import { localRequest, downloadLocalFile, getCurrentAccountIdentity, DEMO_ACCOUNTS, getLocalSession, IS_PUBLIC_DEMO, setDemoAccount } from '../services/localClient';
 import { formatLocalDate, formatLocalMonth } from '../services/dateUtils';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -88,7 +88,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
   const countLabels:Record<string,string> = {customers:'虚构客户',contracts:'销售合同',contact_sheets:'联系单',batches:'生产批次',shipments:'发货记录',payment_receipts:'收款主单'};
 
   return <div className="mx-auto max-w-7xl space-y-6">
-    <PageHeader title="本地设置与工作汇报" description="演示数据只保存在这台电脑；业务场景完整，所有公司、客户与金额均为虚构。" />
+    <PageHeader
+      title={IS_PUBLIC_DEMO ? '公网演示设置与工作汇报' : '本地设置与工作汇报'}
+      description={IS_PUBLIC_DEMO
+        ? '这是与内网完全隔离的只读快照；所有公司、客户与金额均为虚构。'
+        : '演示数据只保存在这台电脑；业务场景完整，所有公司、客户与金额均为虚构。'}
+    />
     <div className="flex gap-2 border-b border-border pb-3">
       {[{id:'local',name:'本地数据',icon:Database},{id:'telegram',name:'Telegram 汇报',icon:Send},{id:'rates',name:'演示汇率',icon:ArrowRightLeft}].map(item => {
         const Icon=item.icon;
@@ -101,29 +106,37 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
         {Object.entries(countLabels).map(([key,label]) => <div key={key} className={panelClass}><div className="text-xs text-muted">{label} · 全库</div><div className="mt-2 text-3xl font-semibold text-ink">{(counts[key] || 0).toLocaleString()}</div></div>)}
       </div>
       <section className={panelClass}>
-        <h2 className="flex items-center gap-2 font-semibold text-ink"><ShieldCheck className="h-5 w-5 text-brand-emerald"/>本地演示身份</h2>
-        <p className="mt-3 text-sm leading-6 text-muted">业务员看个人业务，经理和负责人查看汇总。这里只模拟汇报层级，不提供生产级身份认证，也不会连接任何真实账号。</p>
+        <h2 className="flex items-center gap-2 font-semibold text-ink"><ShieldCheck className="h-5 w-5 text-brand-emerald"/>演示身份</h2>
+        <p className="mt-3 text-sm leading-6 text-muted">业务员看个人业务，经理和负责人查看汇总。这里只模拟汇报层级，不连接任何真实账号；公网版本中的所有身份均为只读。</p>
         <select aria-label="设置演示身份" className={`mt-4 ${inputClass}`} value={getLocalSession().user.id} onChange={event=>{setDemoAccount(event.target.value);window.location.reload();}}>
           {DEMO_ACCOUNTS.map(account=><option key={account.id} value={account.id}>{account.name}</option>)}
         </select>
       </section>
       <section className={panelClass}>
-        <h2 className="font-semibold text-ink">持久化、备份与重置</h2>
-        <p className="mt-3 text-sm leading-7 text-muted">工作数据库：<code>data/demo.sqlite3</code>；虚构种子：<code>data/demo-seed.json</code>。刷新页面或重启应用不会丢失已保存数据。重置前会自动保存数据库备份；导出的 JSON 包含全库快照，请妥善保管。</p>
+        <h2 className="font-semibold text-ink">{IS_PUBLIC_DEMO ? '公网快照与隔离说明' : '持久化、备份与重置'}</h2>
+        <p className="mt-3 text-sm leading-7 text-muted">{IS_PUBLIC_DEMO
+          ? '公网站点使用随部署生成的虚构数据快照，不连接 NAS、家庭网络或生产系统。访客不能下载全库备份或重置共享数据；业务报表导出仍可在导出中心体验。'
+          : <>工作数据库：<code>data/demo.sqlite3</code>；虚构种子：<code>data/demo-seed.json</code>。刷新页面或重启应用不会丢失已保存数据。重置前会自动保存数据库备份；导出的 JSON 包含全库快照，请妥善保管。</>}
+        </p>
         <div className="mt-5 flex flex-wrap gap-3">
-          <Button disabled={busy} tone="secondary" icon={<Download className="h-4 w-4"/>} onClick={()=>void run(async()=>{await downloadLocalFile('backup',{},'演示数据备份.json');})}>下载 JSON 备份</Button>
-          <Button disabled={busy} tone="secondary" icon={<RefreshCw className="h-4 w-4"/>} onClick={()=>void run(async()=>{await initDataStore(true);onRefreshData();})}>重新读取数据库</Button>
-          <Button disabled={busy || identity.isReadOnly} tone="danger" onClick={()=>void reset()}>备份并重置演示数据</Button>
+          {!IS_PUBLIC_DEMO && <Button disabled={busy} tone="secondary" icon={<Download className="h-4 w-4"/>} onClick={()=>void run(async()=>{await downloadLocalFile('backup',{},'演示数据备份.json');})}>下载 JSON 备份</Button>}
+          <Button disabled={busy} tone="secondary" icon={<RefreshCw className="h-4 w-4"/>} onClick={()=>void run(async()=>{await initDataStore(true);onRefreshData();})}>{IS_PUBLIC_DEMO ? '重新读取演示快照' : '重新读取数据库'}</Button>
+          {!IS_PUBLIC_DEMO && <Button disabled={busy || identity.isReadOnly} tone="danger" onClick={()=>void reset()}>备份并重置演示数据</Button>}
         </div>
       </section>
     </div>}
     {tab==='telegram' && <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
       <section className={panelClass}>
         <h2 className="font-semibold text-ink">业务员 → 经理 → 负责人</h2>
-        <p className="mt-3 text-sm leading-7 text-muted">先预览汇报，再手动确认发送。汇报与首页使用同一份本地经营数据。电脑关机后不会自动运行，也不会自动发送消息。</p>
+        <p className="mt-3 text-sm leading-7 text-muted">{IS_PUBLIC_DEMO
+          ? '公网演示可生成虚构汇报预览，但不会连接 Telegram Bot，也不能向任何真实接收人发送消息。'
+          : '先预览汇报，再手动确认发送。汇报与首页使用同一份本地经营数据。电脑关机后不会自动运行，也不会自动发送消息。'}</p>
         <div className="my-5 rounded-xl bg-surface-muted p-4 text-sm">
           <span className={telegram?.configured?'text-brand-emerald':'text-brand-amber'}>{telegram?.configured?'测试 Bot 已配置':'测试 Bot 尚未配置；仍可预览汇报'}</span>
-          <p className="mt-2 text-xs leading-6 text-muted">在项目根目录的 <code>.env.local</code> 配置 <code>TELEGRAM_BOT_TOKEN</code>、<code>TELEGRAM_MANAGER_CHAT_ID</code> 和 <code>TELEGRAM_OWNER_CHAT_ID</code>，然后重启本地服务。密钥和接收人 ID 不会在页面显示或提交到 Git。</p>
+          <p className="mt-2 text-xs leading-6 text-muted">{IS_PUBLIC_DEMO
+            ? '实际发送仅保留在本地演示版，并需由项目维护者单独配置测试 Bot。公网共享账号永远不会获得 Bot 密钥或发送权限。'
+            : <>在项目根目录的 <code>.env.local</code> 配置 <code>TELEGRAM_BOT_TOKEN</code>、<code>TELEGRAM_MANAGER_CHAT_ID</code> 和 <code>TELEGRAM_OWNER_CHAT_ID</code>，然后重启本地服务。密钥和接收人 ID 不会在页面显示或提交到 Git。</>}
+          </p>
         </div>
         <label className="mb-2 block text-xs text-muted" htmlFor="report-period">汇报周期</label>
         <select id="report-period" value={mode} onChange={event=>{setMode(event.target.value);setReport('');}} className={`w-full ${inputClass}`}>

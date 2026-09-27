@@ -1,8 +1,8 @@
 # Trade Order Dashboard Demo
 
-一个只在本机运行的外贸订单驾驶舱。保留订单、联系单、批次、发货、回款、开票、利润分析、主数据、Excel/Word 导出和 Telegram 经营汇报。所有预置公司、客户、人员、合同和交易均为虚构演示数据。
+一个以本机完整演示为主、同时提供 Cloudflare 公网只读沙箱的外贸订单驾驶舱。保留订单、联系单、批次、发货、回款、开票、利润分析、主数据、Excel/Word 导出和 Telegram 经营汇报。所有预置公司、客户、人员、合同和交易均为虚构演示数据。
 
-不需要 NAS、远程数据库、同步服务或云端 worker。原项目的生产同步与远程部署已经移除；排产日期由本地手工维护。
+不需要 NAS、远程数据库或生产同步服务。原项目的生产同步已经移除；排产日期由本地手工维护。公网沙箱只分发构建时生成的虚构快照，不连接家庭网络、NAS 或本机数据库。
 
 ## 启动
 
@@ -38,6 +38,18 @@ npm start
 
 顶栏提供三个业务员、经理和老板演示身份。业务员编辑各自数据；经理/老板汇总查看。身份切换仅用于演示，**不是安全登录系统**。服务仅绑定 127.0.0.1，不要将端口代理到公网或局域网，也不要录入真实客户数据。JSON 全库备份和健康检查是本机管理功能，并非按业务员隔离的生产权限接口。
 
+## Cloudflare 公网只读沙箱
+
+公网站点位于 [deskdemo.jedliuai.com](https://deskdemo.jedliuai.com)。共享账号只是一道演示入口，不是生产级授权；所有身份在公网均为只读。浏览、身份切换、首页指标、Telegram 汇报预览和十类样例报表下载可用，新增/修改/删除、全库备份、重置和 Telegram 实际发送全部在 Worker 端拒绝。
+
+```sh
+npm run build:cloudflare
+npm run check:cloudflare
+npm run deploy:cloudflare
+```
+
+`build:cloudflare` 会按上海时区当天日期重新生成公网快照和样例报表，再构建 React 前端。生成目录 `frontend/public/.cloudflare-demo/` 与 `frontend/dist/` 均不进入 Git。部署使用 `wrangler.jsonc` 中的自定义域名；`DEMO_PASSWORD` 和 `AUTH_SECRET` 必须用 Wrangler Secret 配置，绝不能写进仓库。Cloudflare 免费计划不提供 Containers，因此公网版本不运行 Python/SQLite，也不接 NAS。
+
 ## Telegram（可选）
 
 复制 .env.local.example 为 .env.local，在本机填写测试 Bot Token、经理与老板的接收人 Chat ID。不要把密钥写进源码或提交 Git。
@@ -56,4 +68,4 @@ npm run lint
 npm run build
 ```
 
-代码主要在 frontend/ 与 local_api/；scripts/local.mjs 管理安装及本地进程；worklog/ 记录中文工作总结。Python HTTP/SQLite 使用标准库，报表生成依赖 openpyxl 和 python-docx。仓库只同步源码、文档和虚构种子，不同步本机数据库与凭据。
+代码主要在 frontend/、local_api/ 与 cloudflare/；scripts/local.mjs 管理安装及本地进程，scripts/build_public_demo.py 生成公网快照；worklog/ 记录中文工作总结。Python HTTP/SQLite 使用标准库，报表生成依赖 openpyxl 和 python-docx。仓库只同步源码、文档和虚构种子，不同步本机数据库、生成快照与凭据。
