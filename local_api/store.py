@@ -269,6 +269,7 @@ class Store:
     def __init__(self, path, seed_path=None):
         self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.uses_default_seed = seed_path is None
         self.seed_path = Path(seed_path).resolve() if seed_path else Path(__file__).resolve().parents[1] / 'data/demo-seed.json'
         with self.connection() as conn:
             conn.executescript('''
@@ -307,7 +308,10 @@ class Store:
             conn.close()
 
     def read_seed(self):
-        if self.seed_path.is_file():
+        if self.uses_default_seed:
+            from .seed import build_seed
+            source = build_seed(date.today())
+        elif self.seed_path.is_file():
             source = json.loads(self.seed_path.read_text(encoding='utf-8-sig'))
         else:
             from .seed import build_seed

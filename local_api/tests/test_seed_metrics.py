@@ -248,6 +248,20 @@ class SeedTest(ModulesTest):
         for sheet in data['contact_sheets']:
             self.assertLessEqual(used[sheet['id']], sheet['quantity'])
 
+    def test_default_demo_store_has_current_month_homepage_metrics(self):
+        today = date.today()
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder) / 'demo.sqlite3')
+            report = self.module('metrics').operating_metrics(
+                store.snapshot('demo-manager'),
+                today.replace(day=1).isoformat(),
+                today.isoformat(),
+            )
+        self.assertGreater(report['orders']['count'], 0)
+        self.assertGreater(report['payments']['count'], 0)
+        self.assertGreater(report['shipments']['count'], 0)
+        self.assertGreater(report['confirmed_profit_rmb'], 0)
+
     def test_seed_frontend_profiles_product_and_packaging_arrays_survive_sqlite(self):
         data = self.seed.build_seed(date(2026, 8, 27))
         with tempfile.TemporaryDirectory() as folder:
