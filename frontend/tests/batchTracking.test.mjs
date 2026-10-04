@@ -3,8 +3,8 @@ import test from 'node:test';
 import { resolveBatchTracking, validateBatchProgressDates, validateBatchQuantityTotal } from '../src/services/batchTracking.ts';
 
 const baseBatch = {
-  batchNo: '260401',
-  productName: '注射用头孢唑林钠',
+  batchNo: 'DEMO-BATCH-001',
+  productName: 'DEMO 虚构粉针剂',
   productionDate: '04/2026',
   expiryDate: '03/2029'
 };

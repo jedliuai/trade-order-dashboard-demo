@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title description">
+  <title id="title">个人订单驾驶舱 · 让数据流动起来</title>
+  <desc id="description">蓝白展示横幅。左侧介绍一次录入、多次复用与业务全局，右侧用关联卡片示意客户、合同、产品、发货、收款与利润。此图为数据链路示意，不是业务截图。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fbff"/><stop offset=".6" stop-color="#eef4ff"/><stop offset="1" stop-color="#e4f5f1"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2563eb"/><stop offset="1" stop-color="#1743b5"/></linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#c4d6f3" stroke-opacity=".35"/></pattern>
+    <filter id="shadow" x="-30%" y="-40%" width="160%" height="200%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#173b74" flood-opacity=".10"/></filter>
+  </defs>
+  <rect width="1280" height="420" rx="24" fill="url(#background)"/>
+  <rect x="655" width="625" height="420" rx="24" fill="url(#grid)"/>
+  <circle cx="1150" cy="65" r="155" fill="#dbeafe" opacity=".5"/>
+  <circle cx="800" cy="420" r="140" fill="#ccfbf1" opacity=".3"/>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif">
+    <rect x="56" y="42" width="168" height="30" rx="15" fill="#dceaff"/>
+    <circle cx="75" cy="57" r="4" fill="#2563eb"/>
+    <text x="89" y="62" fill="#2456b0" font-size="12" font-weight="700" letter-spacing="1.5">TRADE TRACKER</text>
+    <text x="56" y="143" fill="#142e5e" font-size="47" font-weight="800">个人订单驾驶舱</text>
+    <text x="58" y="179" fill="#71829b" font-size="13" letter-spacing="2.5">YOUR ORDERS. YOUR BUSINESS. YOUR VIEW.</text>
+    <text x="56" y="242" fill="#2563eb" font-size="29" font-weight="700">让数据流动起来</text>
+    <text x="56" y="284" fill="#142e5e" font-size="29" font-weight="700">让业务全局看得见</text>
+    <text x="58" y="328" fill="#566881" font-size="17">一次录入 · 多次复用 · 越用越懂自己的业务</text>
+    <text x="58" y="384" fill="#8a9bb2" font-size="11" letter-spacing="1">PUBLIC DEMO · FICTIONAL DATA · LOCAL FIRST</text>
+    <g fill="none" stroke="#91b5e8" stroke-width="2" stroke-dasharray="5 6">
+      <path d="M764 136V176H860"/><path d="M1114 132V176H1060"/>
+      <path d="M755 287V245H860"/><path d="M1117 287V245H1060"/>
+      <path d="M957 250V333"/>
+    </g>
+    <g filter="url(#shadow)">
+      <rect x="847" y="149" width="226" height="110" rx="20" fill="url(#blue)"/>
+      <text x="960" y="191" text-anchor="middle" fill="#fff" font-size="23" font-weight="700">一份合同</text>
+      <text x="960" y="222" text-anchor="middle" fill="#cfe0ff" font-size="17">串起整个业务</text>
+      <rect x="679" y="74" width="170" height="65" rx="16" fill="#fff" stroke="#d5e2f7"/>
+      <circle cx="704" cy="107" r="6" fill="#2563eb"/>
+      <text x="723" y="113" fill="#234474" font-size="18" font-weight="600">客户与订单</text>
+      <rect x="1073" y="68" width="170" height="65" rx="16" fill="#fff" stroke="#d5e2f7"/>
+      <circle cx="1098" cy="101" r="6" fill="#7c3aed"/>
+      <text x="1117" y="107" fill="#234474" font-size="18" font-weight="600">产品与金额</text>
+      <rect x="673" y="284" width="170" height="65" rx="16" fill="#fff" stroke="#d5e2f7"/>
+      <circle cx="698" cy="317" r="6" fill="#0d9488"/>
+      <text x="717" y="323" fill="#234474" font-size="18" font-weight="600">批次与发货</text>
+      <rect x="1073" y="282" width="170" height="65" rx="16" fill="#fff" stroke="#d5e2f7"/>
+      <circle cx="1098" cy="315" r="6" fill="#d97706"/>
+      <text x="1117" y="321" fill="#234474" font-size="18" font-weight="600">收款与利润</text>
+      <rect x="862" y="324" width="193" height="52" rx="16" fill="#fff" stroke="#cddff5"/>
+      <text x="958" y="357" text-anchor="middle" fill="#2563eb" font-size="18" font-weight="700">从细节到业务全局</text>
+    </g>
+    <text x="1226" y="395" fill="#8a9bb2" font-size="10" text-anchor="end">数据链路示意</text>
+  </g>
+</svg>

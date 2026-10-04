@@ -12,9 +12,9 @@ import {
 } from '../src/services/profitWorkspace.ts';
 
 const rows = [
-  { shipment_no: 'SH-001', contract_no: 'PO11041', contact_sheet_no: 'B26001', customer_name: 'DEMO_PACKAGING', product_name: '产品 A', material_no: 'FF01', invoice_month: '2026-07', export_type: '自营', currency: 'USD', exchangeRate: 6.8, costNoTax: 1, salesRmb: 100, profit: 20, isEstimate: false, quantity: 10, unit: '支' },
-  { shipment_no: 'SH-002', contract_no: 'DEMO-002', contact_sheet_no: 'B26002', customer_name: '演示星辰', product_name: '产品 B', material_no: 'FF02', invoice_month: '2026-06', export_type: '转口', currency: 'RMB', exchangeRate: 1, costNoTax: 2, salesRmb: 200, profit: 30, isEstimate: true, quantity: 20, unit: '支' },
-  { shipment_no: 'SH-003', contract_no: 'PO11042', contact_sheet_no: 'B26003', customer_name: 'DEMO_PACKAGING', product_name: '产品 C', material_no: 'FF03', invoice_month: '2026-07', export_type: '自营', currency: 'USD', exchangeRate: null, costNoTax: null, salesRmb: null, profit: null, isEstimate: false, quantity: 30, unit: '支' }
+  { shipment_no: 'SH-001', contract_no: 'DEMO-PO70041', contact_sheet_no: 'DEMO-CS-101', customer_name: 'DEMO_PACKAGING', product_name: '产品 A', material_no: 'DEMO-MAT-A', invoice_month: '2026-07', export_type: '自营', currency: 'USD', exchangeRate: 6.8, costNoTax: 1, salesRmb: 100, profit: 20, isEstimate: false, quantity: 10, unit: '支' },
+  { shipment_no: 'SH-002', contract_no: 'DEMO-002', contact_sheet_no: 'DEMO-CS-102', customer_name: '演示星辰', product_name: '产品 B', material_no: 'DEMO-MAT-B', invoice_month: '2026-06', export_type: '转口', currency: 'RMB', exchangeRate: 1, costNoTax: 2, salesRmb: 200, profit: 30, isEstimate: true, quantity: 20, unit: '支' },
+  { shipment_no: 'SH-003', contract_no: 'DEMO-PO70042', contact_sheet_no: 'DEMO-CS-103', customer_name: 'DEMO_PACKAGING', product_name: '产品 C', material_no: 'DEMO-MAT-C', invoice_month: '2026-07', export_type: '自营', currency: 'USD', exchangeRate: null, costNoTax: null, salesRmb: null, profit: null, isEstimate: false, quantity: 30, unit: '支' }
 ];
 
 test('利润状态只区分已确认和待计算，预估成本不计入利润', () => {
@@ -24,7 +24,7 @@ test('利润状态只区分已确认和待计算，预估成本不计入利润',
 });
 
 test('利润筛选支持时间段、客户、合同、联系单、状态和包含搜索', () => {
-  const filtered = filterProfitWorkspace(rows, { dateFrom: '2026-07-01', dateTo: '2026-07-31', customer: 'DEMO_PACKAGING', contract: 'PO11041', contactSheet: 'B26001', status: 'confirmed', query: 'b260' });
+  const filtered = filterProfitWorkspace(rows, { dateFrom: '2026-07-01', dateTo: '2026-07-31', customer: 'DEMO_PACKAGING', contract: 'DEMO-PO70041', contactSheet: 'DEMO-CS-101', status: 'confirmed', query: 'demo-cs-10' });
   assert.deepEqual(filtered.map((row) => row.shipment_no), ['SH-001']);
 });
 
@@ -50,8 +50,8 @@ test('利润筛选候选项按月份倒序并对客户去重', () => {
   assert.deepEqual(listProfitFilterOptions(rows), {
     months: ['2026-07', '2026-06'],
     customers: ['DEMO_PACKAGING', '演示星辰'],
-    contracts: ['DEMO-002', 'PO11041', 'PO11042'],
-    contactSheets: ['B26001', 'B26002', 'B26003']
+    contracts: ['DEMO-002', 'DEMO-PO70041', 'DEMO-PO70042'],
+    contactSheets: ['DEMO-CS-101', 'DEMO-CS-102', 'DEMO-CS-103']
   });
 });
 

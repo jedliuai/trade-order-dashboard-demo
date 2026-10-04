@@ -4,14 +4,14 @@ import { readFileSync } from 'node:fs';
 import { filterComboboxOptions } from '../src/services/comboboxSearch.ts';
 
 const options = [
-  { value: '1', label: 'DEMO-CL-OP15097 (演示星辰商贸有限公司)', searchText: 'DEMO-CL-OP15097' },
-  { value: '2', label: 'DEMO-PY-EQ263252 (演示星辰商贸有限公司)', searchText: 'DEMO-PY-EQ263252' },
+  { value: '1', label: 'DEMO-CL-EXAMPLE01 (演示星辰商贸有限公司)', searchText: 'DEMO-CL-EXAMPLE01' },
+  { value: '2', label: 'DEMO-PY-EXAMPLE02 (演示星辰商贸有限公司)', searchText: 'DEMO-PY-EXAMPLE02' },
   { value: '3', label: 'DEMOGE01 (DEMO ATLAS LTD.)' }
 ];
 
 test('可搜索选择框采用不区分大小写的包含匹配', () => {
   assert.deepEqual(
-    filterComboboxOptions(options, 'op150').map(option => option.value),
+    filterComboboxOptions(options, 'example01').map(option => option.value),
     ['1']
   );
   assert.deepEqual(

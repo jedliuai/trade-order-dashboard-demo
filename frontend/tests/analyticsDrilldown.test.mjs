@@ -8,7 +8,7 @@ const contract = {
   contract_date: '2025-12-10', export_type: '自营', currency: 'USD', status: '执行中'
 };
 const sheet = {
-  id: 's1', contract_id: 'c1', contact_sheet_no: 'B001', product_name: '产品 A', material_no: 'FF01',
+  id: 's1', contract_id: 'c1', contact_sheet_no: 'B001', product_name: '产品 A', material_no: 'DEMO-MAT-A',
   country: '哥伦比亚', quantity: 100, unit_price: 2, status: '发货完成'
 };
 const shipment = {
@@ -21,7 +21,7 @@ const baseInput = {
   shipmentItems: [{ id: 'item-1', shipment_id: 'sh1', contact_sheet_id: 's1', shipped_quantity: 100, unit_price: 2, batch_no: '26001' }],
   payments: [{ id: 'p1', contract_id: 'c1', payment_date: '2026-02-01', amount: 200, amount_rmb: 1400, currency: 'USD', payment_type: '尾款' }],
   invoices: [{ id: 'i1', invoice_no: 'INV-1', invoice_date: '2026-03-01', currency: 'USD', status: '已收到电子发票', shipment_ids: ['sh1'], shipment_allocations: [{ shipment_id: 'sh1', allocated_amount: 200 }] }],
-  profits: [{ shipment_id: 'sh1', shipment_no: 'SH-001', contract_no: 'PO-001', customer_name: '客户 A', contact_sheet_no: 'B001', batch_no: '26001', material_no: 'FF01', product_name: '产品 A', invoice_month: '2026-03', profit: 300, gross_margin: 0.2 }],
+  profits: [{ shipment_id: 'sh1', shipment_no: 'SH-001', contract_no: 'PO-001', customer_name: '客户 A', contact_sheet_no: 'B001', batch_no: '26001', material_no: 'DEMO-MAT-A', product_name: '产品 A', invoice_month: '2026-03', profit: 300, gross_margin: 0.2 }],
   receivables: [{
     id: 'sh1:item-1', contractId: 'c1', contractNo: 'PO-001', contractDate: '2025-12-10',
     shipmentId: 'sh1', shipmentNo: 'SH-001', shipmentDate: '2026-01-20', customerName: '客户 A',

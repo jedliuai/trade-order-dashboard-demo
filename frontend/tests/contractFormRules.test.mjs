@@ -24,10 +24,10 @@ test('复制合同时备注保持为空', () => {
 
 test('合同号防重忽略大小写和首尾空格，并允许编辑当前合同', () => {
   const rows = [
-    { id: 'contract-1', contract_no: 'PO11003' },
+    { id: 'contract-1', contract_no: 'DEMO-PO70003' },
     { id: 'contract-2', contract_no: 'DEMONL08' },
   ];
-  assert.equal(hasDuplicateContractNumber(rows, ' po11003 '), true);
-  assert.equal(hasDuplicateContractNumber(rows, 'PO11003', 'contract-1'), false);
-  assert.equal(hasDuplicateContractNumber(rows, 'PO11004'), false);
+  assert.equal(hasDuplicateContractNumber(rows, ' demo-po70003 '), true);
+  assert.equal(hasDuplicateContractNumber(rows, 'DEMO-PO70003', 'contract-1'), false);
+  assert.equal(hasDuplicateContractNumber(rows, 'DEMO-PO70004'), false);
 });

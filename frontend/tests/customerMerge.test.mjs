@@ -8,8 +8,8 @@ import {
 
 test('客户名称建议匹配忽略空格和常见中英文标点', () => {
   assert.equal(
-    normalizeCustomerIdentity('EVEREST BIOTECH CO., LTD'),
-    normalizeCustomerIdentity('EVEREST BIOTECH CO.,LTD')
+    normalizeCustomerIdentity('DEMO FICTIONAL PARTNER CO., LTD'),
+    normalizeCustomerIdentity('DEMO FICTIONAL PARTNER CO.,LTD')
   );
   assert.equal(
     normalizeCustomerIdentity(' 演示，星辰。商贸 '),

@@ -1459,7 +1459,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                         type="text"
                         value={contactSheetNo}
                         onChange={(e) => setContactSheetNo(e.target.value)}
-                        placeholder="如 B260882"
+                        placeholder="如 DEMO-CS-002"
                         className={contactSheetInputClass()}
                       />
                     </FormField>
@@ -1473,7 +1473,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                           setMaterialNo(e.target.value);
                           clearFormError('materialNo');
                         }}
-                        placeholder="如 FF11264"
+                        placeholder="如 DEMO-MAT-003"
                         aria-invalid={Boolean(formErrors.materialNo) || undefined}
                         className={contactSheetInputClass(Boolean(formErrors.materialNo))}
                       />

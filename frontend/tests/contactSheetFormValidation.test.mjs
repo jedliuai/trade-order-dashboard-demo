@@ -26,7 +26,7 @@ test('联系单表单把必填错误返回到对应字段', () => {
 
 test('正常新建联系单必须选择正式产品规格，历史兼容可显式放行', () => {
   const base = {
-    businessType: '制剂', contractId: 'contract-1', materialNo: 'FF01230', productName: '注射用头孢唑林钠',
+    businessType: '制剂', contractId: 'contract-1', materialNo: 'DEMO-MAT-001', productName: 'DEMO 虚构粉针剂',
     unitPrice: 0.225, quantity: 78000, unit: '支'
   };
   assert.equal(validateContactSheetForm({ ...base, requiresProductVariant: true }).productVariantId, '请从产品主数据中选择已有的产品规格。');
@@ -37,8 +37,8 @@ test('联系单表单接受去除首尾空格后有效的数据', () => {
   assert.deepEqual(validateContactSheetForm({
     businessType: '制剂',
     contractId: 'contract-1',
-    materialNo: ' FF01230 ',
-    productName: ' 注射用头孢唑林钠 ',
+    materialNo: ' DEMO-MAT-001 ',
+    productName: ' DEMO 虚构粉针剂 ',
     unitPrice: 0.225,
     quantity: 78000,
     unit: ' 支 '
@@ -49,8 +49,8 @@ test('人民币制剂联系单必须维护每箱装量以支持收货确认函',
   const base = {
     businessType: '制剂',
     contractId: 'contract-rmb',
-    materialNo: 'FF01230',
-    productName: '注射用头孢唑林钠',
+    materialNo: 'DEMO-MAT-001',
+    productName: 'DEMO 虚构粉针剂',
     unitPrice: 2.12,
     quantity: 100000,
     unit: '支',
@@ -68,8 +68,8 @@ test('联系单计量单位只接受支、盒、瓶、kg和十亿', () => {
   const base = {
     businessType: '原料药',
     contractId: 'contract-1',
-    materialNo: 'S20032',
-    productName: '头孢曲松钠',
+    materialNo: 'DEMO-RAW-001',
+    productName: 'DEMO 虚构原料',
     unitPrice: 730,
     quantity: 500,
   };
