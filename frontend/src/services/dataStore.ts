@@ -253,7 +253,7 @@ export interface ExchangeRate {
   currency_pair: string;
   rate: number;
   source_date: string;
-  source: 'ChinaMoney' | 'Manual';
+  source: 'Manual';
   notes: string;
   created_at: string;
 }
@@ -639,7 +639,7 @@ function mapExchangeRateRow(row: any): ExchangeRate {
     currency_pair: str(row.currency_pair || 'USD/CNY'),
     rate: num(row.rate),
     source_date: str(row.source_date),
-    source: row.source === 'ChinaMoney' ? 'ChinaMoney' : 'Manual',
+    source: 'Manual',
     notes: str(row.notes),
     created_at: str(row.created_at)
   };

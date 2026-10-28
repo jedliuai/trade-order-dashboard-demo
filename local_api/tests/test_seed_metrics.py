@@ -225,8 +225,8 @@ class SeedTest(ModulesTest):
         self.seed = self.module('seed')
 
     def test_deterministic_volume_history_variety_and_reference_integrity(self):
-        data = self.seed.build_seed(date(2026, 8, 27))
-        self.assertEqual(data, self.seed.build_seed(date(2026, 8, 27)))
+        data = self.seed.build_large_seed(date(2026, 8, 27))
+        self.assertEqual(data, self.seed.build_large_seed(date(2026, 8, 27)))
         self.assertEqual(set(data), set(TABLES))
         normalize_validate(copy.deepcopy(data))
         for table, minimum in [('customers', 60), ('contracts', 1000), ('contact_sheets', 2000),
@@ -283,7 +283,7 @@ class SeedTest(ModulesTest):
             self.assertEqual({p['user_id'] for p in users}, {'demo-sales-1', 'demo-sales-2', 'demo-sales-3', 'demo-manager', 'demo-owner'})
             self.assertTrue(all(p['display_name'] and p['login_name'] for p in users))
             profits = store.query('v_shipment_profit', user='demo-manager')
-            self.assertGreater(len(profits), 2000)
+            self.assertGreater(len(profits), 200)
             self.assertTrue(any(p['profit'] is not None for p in profits))
             self.assertTrue(any(p['is_estimated_profit'] for p in profits))
 

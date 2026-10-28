@@ -23,7 +23,7 @@ def _money(value):
     return float(Decimal(str(value)).quantize(Decimal('.01'), rounding=ROUND_HALF_UP))
 
 
-def build_seed(as_of: date) -> dict:
+def build_large_seed(as_of: date) -> dict:
     """Build the complete Store table graph, including frontend master data."""
     if type(as_of) is not date:
         raise ValueError('as_of must be a datetime.date')
@@ -265,6 +265,12 @@ def build_seed(as_of: date) -> dict:
             dimension='month', chart_type='composed', currency_mode='RMB')
     normalize_validate(data)
     return data
+
+
+def build_seed(as_of: date) -> dict:
+    """Small presentation dataset; use build_large_seed explicitly for load tests."""
+    from .demo_scenarios import build_compact_seed
+    return build_compact_seed(build_large_seed(as_of), as_of)
 
 
 def main(argv=None):

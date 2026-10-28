@@ -96,7 +96,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
         : '演示数据只保存在这台电脑；业务场景完整，所有公司、客户与金额均为虚构。'}
     />
     <div role="tablist" aria-label="本地设置分类" onKeyDown={handleTabListKeyDown} className="flex flex-wrap gap-2 border-b border-border pb-3">
-      {[{id:'local',name:'本地数据',icon:Database},{id:'telegram',name:'Telegram 汇报',icon:Send},{id:'rates',name:'演示汇率',icon:ArrowRightLeft}].map(item => {
+      {[{id:'local',name:'本地数据',icon:Database},{id:'telegram',name:'Telegram 汇报',icon:Send},{id:'rates',name:'手动汇率',icon:ArrowRightLeft}].map(item => {
         const Icon=item.icon;
         return <Button key={item.id} role="tab" id={`settings-tab-${item.id}`} aria-selected={tab===item.id} aria-controls={`settings-panel-${item.id}`} tabIndex={tab===item.id?0:-1} tone={tab===item.id?'primary':'secondary'} onClick={()=>setTab(item.id as typeof tab)} icon={<Icon className="h-4 w-4"/>}>{item.name}</Button>;
       })}
@@ -155,8 +155,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
       <section className={panelClass}><h2 className="font-semibold text-ink">汇报预览</h2><pre className="mt-4 min-h-80 whitespace-pre-wrap break-words text-sm leading-7 text-body">{report || '选择周期和接收人，点击“生成汇报预览”。预览不会发送消息。'}</pre></section>
     </div>}
     {tab==='rates' && <section role="tabpanel" id="settings-panel-rates" aria-labelledby="settings-tab-rates" className={panelClass}>
-      <h2 className="font-semibold text-ink">手工维护演示汇率</h2>
-      <p className="my-3 text-sm text-muted">这些汇率只服务于演示计算，不是实时市场价格，不会联网自动同步。</p>
+      <h2 className="font-semibold text-ink">手动输入月度汇率</h2>
+      <p className="my-3 text-sm text-muted">按月份输入并保存 USD/CNY 汇率。预置数值均为虚构样例，可在这里修改；系统不连接任何汇率服务。</p>
       {!identity.isReadOnly && <form onSubmit={event=>void saveRate(event)} className="my-5 flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-xs text-muted">生效月份<input aria-label="汇率月份" type="month" required value={rateMonth} onChange={event=>setRateMonth(event.target.value)} className={inputClass}/></label>
         <label className="grid gap-1 text-xs text-muted">USD/CNY<input aria-label="汇率数值" type="number" min="0.0001" step="0.0001" required value={rateValue} onChange={event=>setRateValue(event.target.value)} className={inputClass}/></label>

@@ -1045,7 +1045,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
               {formCustomerId && formCurrency === 'USD' && (
                 <div className="p-3 bg-slate-900/60 border border-white/[0.05] rounded-lg space-y-2 text-[11px] leading-relaxed">
                   <div className="flex justify-between items-center text-slate-400">
-                    <span>系统自动查询 {calculatedExchangeRateInfo.month} 汇率:</span>
+                    <span>使用 {calculatedExchangeRateInfo.month} 手动维护的汇率:</span>
                     <span className="font-bold text-white">{calculatedExchangeRateInfo.rate ? calculatedExchangeRateInfo.rate.toFixed(4) : '未维护'}</span>
                   </div>
                   {calculatedExchangeRateInfo.isMissing && (

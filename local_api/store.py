@@ -772,6 +772,9 @@ def normalize_validate(rows, before=None):
                 raise ApiError('发票只能覆盖同一客户、币种的已发货记录')
             coverage[covered['id']].append((invoice, number(link['allocated_amount'])))
     for rate in rows['exchange_rates']:
+        rate.setdefault('source', 'Manual')
+        if rate['source'] != 'Manual':
+            raise ApiError('汇率只支持手动输入，不支持自动同步来源')
         positive(rate, 'rate')
         iso_date(str(rate.get('effective_month')) + '-01', '汇率月份')
         if rate.get('currency_pair') != 'USD/CNY':

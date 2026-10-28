@@ -54,7 +54,7 @@ class LocalApiTest(unittest.TestCase):
             item_rows=[{'contact_sheet_id': 'cs', 'batch_id': 'b', 'shipped_quantity': quantity, 'unit_price': 10}])
 
     def test_seed_volume_history_relations_and_role_coverage(self):
-        build_seed = importlib.import_module('local_api.seed').build_seed
+        build_seed = importlib.import_module('local_api.seed').build_large_seed
         data = build_seed(date(2026, 8, 27))
         self.assertGreaterEqual(len(data['customers']), 60)
         self.assertGreaterEqual(len(data['contracts']), 1000)
