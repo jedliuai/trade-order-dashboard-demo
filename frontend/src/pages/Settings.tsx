@@ -6,6 +6,7 @@ import { formatLocalDate, formatLocalMonth } from '../services/dateUtils';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
 import { useFeedback } from '../components/FeedbackProvider';
+import { handleTabListKeyDown } from '../components/tabKeyboard';
 
 interface SettingsProps { onRefreshData: () => void; onRefreshTrigger: number }
 type TelegramStatus = { configured: boolean; recipients: {manager: boolean; owner: boolean} };
@@ -94,14 +95,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
         ? '这是与内网完全隔离的只读快照；所有公司、客户与金额均为虚构。'
         : '演示数据只保存在这台电脑；业务场景完整，所有公司、客户与金额均为虚构。'}
     />
-    <div className="flex gap-2 border-b border-border pb-3">
+    <div role="tablist" aria-label="本地设置分类" onKeyDown={handleTabListKeyDown} className="flex flex-wrap gap-2 border-b border-border pb-3">
       {[{id:'local',name:'本地数据',icon:Database},{id:'telegram',name:'Telegram 汇报',icon:Send},{id:'rates',name:'演示汇率',icon:ArrowRightLeft}].map(item => {
         const Icon=item.icon;
-        return <Button key={item.id} tone={tab===item.id?'primary':'secondary'} onClick={()=>setTab(item.id as typeof tab)} icon={<Icon className="h-4 w-4"/>}>{item.name}</Button>;
+        return <Button key={item.id} role="tab" id={`settings-tab-${item.id}`} aria-selected={tab===item.id} aria-controls={`settings-panel-${item.id}`} tabIndex={tab===item.id?0:-1} tone={tab===item.id?'primary':'secondary'} onClick={()=>setTab(item.id as typeof tab)} icon={<Icon className="h-4 w-4"/>}>{item.name}</Button>;
       })}
     </div>
     {error && <div role="alert" className="rounded-xl border border-brand-rose/30 bg-brand-rose/10 p-4 text-sm text-brand-rose">{error}</div>}
-    {tab==='local' && <div className="space-y-6">
+    {tab==='local' && <div role="tabpanel" id="settings-panel-local" aria-labelledby="settings-tab-local" className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         {Object.entries(countLabels).map(([key,label]) => <div key={key} className={panelClass}><div className="text-xs text-muted">{label} · 全库</div><div className="mt-2 text-3xl font-semibold text-ink">{(counts[key] || 0).toLocaleString()}</div></div>)}
       </div>
@@ -125,7 +126,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
         </div>
       </section>
     </div>}
-    {tab==='telegram' && <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+    {tab==='telegram' && <div role="tabpanel" id="settings-panel-telegram" aria-labelledby="settings-tab-telegram" className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
       <section className={panelClass}>
         <h2 className="font-semibold text-ink">业务员 → 经理 → 负责人</h2>
         <p className="mt-3 text-sm leading-7 text-muted">{IS_PUBLIC_DEMO
@@ -153,7 +154,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
       </section>
       <section className={panelClass}><h2 className="font-semibold text-ink">汇报预览</h2><pre className="mt-4 min-h-80 whitespace-pre-wrap break-words text-sm leading-7 text-body">{report || '选择周期和接收人，点击“生成汇报预览”。预览不会发送消息。'}</pre></section>
     </div>}
-    {tab==='rates' && <section className={panelClass}>
+    {tab==='rates' && <section role="tabpanel" id="settings-panel-rates" aria-labelledby="settings-tab-rates" className={panelClass}>
       <h2 className="font-semibold text-ink">手工维护演示汇率</h2>
       <p className="my-3 text-sm text-muted">这些汇率只服务于演示计算，不是实时市场价格，不会联网自动同步。</p>
       {!identity.isReadOnly && <form onSubmit={event=>void saveRate(event)} className="my-5 flex flex-wrap items-end gap-3">

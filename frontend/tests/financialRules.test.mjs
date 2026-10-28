@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   balanceLastPaymentAllocation,
   createCustomerDepositLedgerRow,
+  getContractAmount,
   getContractOutstandingAmount,
   getDatedInvoiceCoverage,
   getReceivableContracts,
@@ -90,6 +91,16 @@ test('收款金额按数据库四位精度消除浮点残差', () => {
     unallocated: 0,
     isBalanced: true
   });
+});
+
+test('尚无联系单的未归档合同仍可先登记收款', () => {
+  const contractWithoutSheets = { id: 'pending-amount', customer_id: 'customer-a', archived: false };
+  assert.equal(getContractAmount(contractWithoutSheets.id, contactSheets), 0);
+  assert.deepEqual(
+    getReceivableContracts('customer-a', [...contracts, contractWithoutSheets], contactSheets, payments)
+      .map((contract) => contract.id),
+    ['unpaid', 'pending-amount']
+  );
 });
 
 test('新增收款只有一个合同时自动填满实际到账总额', () => {

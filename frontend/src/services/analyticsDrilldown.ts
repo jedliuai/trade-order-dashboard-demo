@@ -221,7 +221,7 @@ export function buildAnalyticsDrillRows(input: AnalyticsDrilldownInput): Analyti
           contractNo: contract.contract_no,
           productMaterial: splitBySheet ? sheetLabel(sheet) : '合同级收款',
           amountRmb: amountRmb === null ? null : amountRmb * weight,
-          status: payment.payment_type,
+          status: '已到账',
           note: splitBySheet ? '合同级收款按联系单金额比例展示' : payment.notes
         });
       });

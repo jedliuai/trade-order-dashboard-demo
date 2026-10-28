@@ -210,7 +210,7 @@ def main():
     parser = argparse.ArgumentParser(description='本地订单驾驶舱演示服务（仅本机）')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--database', type=Path, default=ROOT / 'data/demo.sqlite3')
-    parser.add_argument('--seed', type=Path, default=ROOT / 'data/demo-seed.json')
+    parser.add_argument('--seed', type=Path, default=None, help='可选的虚构种子 JSON；默认按当天生成')
     args = parser.parse_args()
     store = Store(args.database, args.seed)
     with make_server(store, port=args.port) as server:

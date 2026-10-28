@@ -143,7 +143,7 @@ def build_seed(as_of: date) -> dict:
             contract_date=contract_date.isoformat(), destination_country=customer['country'], currency=currency,
             export_type='转口' if currency == 'RMB' else '自营', incoterm=terms,
             delivery_days=55, agreed_delivery_date=(contract_date + timedelta(days=55)).isoformat(),
-            payment_terms=customer['default_payment_terms'], prepayment_ratio=40,
+            payment_terms=customer['default_payment_terms'], prepayment_ratio=.4,
             internal_contract_seq=f'DEMO-SEQ-{n + 1:04}', is_historical=age > 730,
             notes='DEMO 纯虚构本地合同；所有金额、客户和批号均为生成数据。')
         contract['created_at'] = contract['updated_at'] = contract_date.isoformat() + 'T09:00:00+08:00'

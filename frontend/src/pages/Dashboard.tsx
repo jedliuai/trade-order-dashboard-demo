@@ -19,6 +19,8 @@ import {
   YAxis
 } from 'recharts';
 import { FiscalProgressRing } from '../components/FiscalProgressRing';
+import { createNiceChartScale } from '../services/chartScale';
+import { calculateFiscalProgress } from '../services/fiscalProgress';
 import {
   calculateGrowthPercent,
   emptyDashboardPeriodMetrics,
@@ -61,6 +63,47 @@ const PRIORITY_TONES: Record<PriorityTone, string> = {
   blue: 'border-[#b8d2e4] bg-[#f0f7fb] text-[#3e708f]',
   green: 'border-[#b9d7c2] bg-[#eff8f1] text-[#467657]'
 };
+
+const FISCAL_RING_COLOR = '#ad8557';
+
+const TREND_SERIES = [
+  { key: 'orders', label: '新增订单', color: '#ad8557' },
+  { key: 'payments', label: '到账回款', color: '#5d8768' },
+  { key: 'shipments', label: '实际发货', color: '#a8624d' }
+] as const;
+
+interface TrendTooltipEntry {
+  dataKey?: string | number;
+  value?: string | number;
+}
+
+function TrendTooltip({
+  active,
+  label,
+  payload
+}: {
+  active?: boolean;
+  label?: string | number;
+  payload?: readonly TrendTooltipEntry[];
+}) {
+  if (!active || !payload?.length) return null;
+
+  const values = new Map(payload.map((entry) => [String(entry.dataKey), Number(entry.value || 0)]));
+
+  return (
+    <div className="rounded-xl border border-[#ded6cb] bg-white px-4 py-3 shadow-[0_12px_30px_rgba(70,54,35,.08)]">
+      <div className="mb-2 text-sm font-bold text-ink">{label}</div>
+      <ul className="space-y-1.5 text-xs text-[#514940]">
+        {TREND_SERIES.map((series) => (
+          <li key={series.key} className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: series.color }} aria-hidden="true" />
+            <span>{series.label}：{(values.get(series.key) || 0).toLocaleString('zh-CN')} 万元</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function formatWan(value: number) {
   return (Number(value || 0) / 10000).toLocaleString('zh-CN', {
@@ -287,6 +330,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onRefreshTrigg
     { key: 'shipments' as const, title: '实际发货', color: '#a8624d', current: currentFiscal.shipments.amountRmb, previous: previousFiscal.shipments.amountRmb },
     { key: 'profit' as const, title: '已确认毛利', color: '#a17b30', current: currentFiscal.confirmedProfitRmb, previous: previousFiscal.confirmedProfitRmb }
   ];
+  const fiscalRingCapacity = Math.max(
+    2,
+    ...fiscalCards.map((card) => {
+      const percent = calculateFiscalProgress(card.current, card.previous).percent;
+      return Math.ceil(Math.max((percent || 0) / 100, 0.0001) - 1e-10);
+    })
+  );
 
   const trendData = useMemo(() => trendRanges.map(({ month, range }) => {
     const metrics = operatingMetrics[rangeKey(range)] || emptyDashboardPeriodMetrics();
@@ -297,6 +347,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onRefreshTrigg
       shipments: Math.round(metrics.shipments.amountRmb / 10000)
     };
   }), [trendRanges, operatingMetrics]);
+  const trendAxis = useMemo(() => createNiceChartScale(
+    trendData.flatMap((month) => TREND_SERIES.map((series) => month[series.key]))
+  ), [trendData]);
 
   const missingRateMonths = useMemo(() => [...new Set([
     ...currentMonth.missingRateMonths,
@@ -394,7 +447,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onRefreshTrigg
                   <div className="mt-2 font-heading text-xl font-extrabold" style={{ color: card.color }}>￥{formatWan(card.current)} 万</div>
                   <p className="mt-3 text-[10px] leading-4 text-subtle">上财年 ￥{formatWan(card.previous)} 万</p>
                 </div>
-                <FiscalProgressRing current={card.current} previous={card.previous} color={card.color} />
+                <FiscalProgressRing current={card.current} previous={card.previous} color={FISCAL_RING_COLOR} sharedCapacityTurns={fiscalRingCapacity} />
               </article>
             ))}
           </div>
@@ -489,22 +542,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onRefreshTrigg
           </button>
         </div>
         <div className="rounded-2xl border border-[#ded6cb] bg-white p-5 shadow-[0_12px_35px_rgba(70,54,35,0.045)]">
-          <div className="h-80 w-full text-xs">
+          <div
+            className="h-80 w-full text-xs"
+            role="img"
+            aria-label="本财年每月新增订单、到账回款和实际发货金额对比柱状图，单位为人民币万元"
+          >
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={trendData} margin={{ top: 12, right: 8, left: -12, bottom: 0 }} barGap={2}>
-                <CartesianGrid vertical={false} stroke="#eee8e0" strokeDasharray="3 3" />
+                <CartesianGrid vertical={false} stroke="#e4ddd4" strokeDasharray="4 4" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#81776c', fontSize: 10 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#81776c', fontSize: 10 }} />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  ticks={trendAxis.ticks}
+                  domain={[0, trendAxis.domainMax]}
+                  allowDecimals={false}
+                  tickFormatter={(value) => Number(value).toLocaleString('zh-CN')}
+                  tick={{ fill: '#81776c', fontSize: 10 }}
+                />
                 <Tooltip
                   cursor={{ fill: '#f7f2eb' }}
-                  contentStyle={{ backgroundColor: '#fff', border: '1px solid #ded6cb', borderRadius: 12, boxShadow: '0 12px 30px rgba(70,54,35,.08)' }}
-                  labelStyle={{ color: '#332e28', fontWeight: 700 }}
-                  formatter={(value, name) => [`${Number(value).toLocaleString('zh-CN')} 万元`, String(name)]}
+                  content={<TrendTooltip />}
                 />
-                <Legend iconType="circle" wrapperStyle={{ paddingTop: 16, fontSize: 11 }} />
-                <Bar dataKey="orders" name="新增订单" fill="#ad8557" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                <Bar dataKey="payments" name="到账回款" fill="#5d8768" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                <Bar dataKey="shipments" name="实际发货" fill="#a8624d" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                <Legend
+                  content={() => (
+                    <ul className="flex flex-wrap justify-center gap-x-4 gap-y-2 pt-4 text-[11px] text-[#6f665e]" aria-label="图表图例">
+                      {TREND_SERIES.map((series) => (
+                        <li key={series.key} className="inline-flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: series.color }} aria-hidden="true" />
+                          <span>{series.label}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                />
+                {TREND_SERIES.map((series) => (
+                  <Bar key={series.key} dataKey={series.key} name={series.label} fill={series.color} radius={[4, 4, 0, 0]} maxBarSize={22} />
+                ))}
               </BarChart>
             </ResponsiveContainer>
           </div>

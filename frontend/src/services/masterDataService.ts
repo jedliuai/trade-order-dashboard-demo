@@ -70,6 +70,7 @@ export interface PackagingProfileVersion {
   profile_id: string;
   version_no: number;
   is_current: boolean;
+  workshop: string;
   effective_from: string | null;
   effective_to: string | null;
   change_reason: string;

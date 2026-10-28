@@ -11,6 +11,7 @@ import { FormField } from '../components/FormField';
 import { SearchToolbar } from '../components/SearchToolbar';
 import { CustomerSelect } from '../components/CustomerSelect';
 import { CustomerOrderManager } from '../components/CustomerOrderManager';
+import { handleTabListKeyDown } from '../components/tabKeyboard';
 import { normalizeCustomerIdentity, summarizeCustomerReferences } from '../services/customerMerge';
 import { Plus, Edit2, Trash2, Globe, X, ArrowUpDown, CalendarRange, CreditCard, GitMerge, ArrowRight, ListOrdered, UsersRound } from 'lucide-react';
 
@@ -224,11 +225,14 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
         ) : undefined}
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="tablist" aria-label="客户主数据分区">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="tablist" aria-label="客户主数据分区" onKeyDown={handleTabListKeyDown}>
         <button
+          id="customers-tab-profiles"
           type="button"
           role="tab"
           aria-selected={activeSection === 'profiles'}
+          aria-controls="customers-panel-profiles"
+          tabIndex={activeSection === 'profiles' ? 0 : -1}
           onClick={() => setActiveSection('profiles')}
           className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-colors ${activeSection === 'profiles' ? 'border-brand-cyan/35 bg-brand-cyan/[0.07] shadow-sm' : 'border-border bg-surface hover:border-border-strong hover:bg-surface-muted'}`}
         >
@@ -239,9 +243,12 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
           </span>
         </button>
         <button
+          id="customers-tab-display-order"
           type="button"
           role="tab"
           aria-selected={activeSection === 'display-order'}
+          aria-controls="customers-panel-display-order"
+          tabIndex={activeSection === 'display-order' ? 0 : -1}
           onClick={() => {
             setShowModal(false);
             setActiveSection('display-order');
@@ -257,7 +264,7 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
       </div>
 
       {activeSection === 'profiles' ? (
-        <>
+        <div id="customers-panel-profiles" role="tabpanel" aria-labelledby="customers-tab-profiles" className="space-y-6">
       {/* Search & Stats bar */}
       <SearchToolbar
         value={searchQuery}
@@ -365,9 +372,11 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
           </div>
         )}
       </div>
-        </>
+        </div>
       ) : (
-        <CustomerOrderManager customers={customers} />
+        <div id="customers-panel-display-order" role="tabpanel" aria-labelledby="customers-tab-display-order">
+          <CustomerOrderManager customers={customers} />
+        </div>
       )}
 
       {/* Edit/Add Modal Overlay */}
@@ -395,7 +404,7 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="如 DEMO HORIZON LTD."
+                  placeholder="如 NL PHARMA S.A."
                   className="w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-ink"
                 />
               </FormField>

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpDown, Edit2, PackageSearch, Plus, RotateCcw, Search, XCircle } from 'lucide-react';
+import { ArrowUpDown, Edit2, PackageSearch, Plus, RotateCcw, Search, X, XCircle } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Dialog } from '../components/Dialog';
 import { FormField } from '../components/FormField';
+import { IconButton } from '../components/IconButton';
 import { PageHeader } from '../components/PageHeader';
 import { useFeedback } from '../components/FeedbackProvider';
 import { ProductOrderManager } from '../components/ProductOrderManager';
@@ -222,7 +223,7 @@ export function ProductMasterData() {
       await refresh();
       notify({
         title: editing ? '产品主数据已更新' : '产品主数据已创建',
-        message: editing ? '产品基本信息已经更新；规格由独立记录区维护。' : '名称、剂型、别名与规格已经写入共享 SQLite 主数据。',
+        message: editing ? '产品基本信息已经更新；规格由独立记录区维护。' : '名称、剂型、别名与规格已经写入共享 本地数据库 主数据。',
         tone: 'success'
       });
     } catch (caught) {
@@ -266,24 +267,24 @@ export function ProductMasterData() {
       {error && <div role="alert" className="rounded-xl border border-brand-rose/25 bg-brand-rose/8 px-4 py-3 text-xs text-brand-rose">{error}</div>}
 
       <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
-        <div className="grid grid-cols-[minmax(250px,1.65fr)_100px_120px_minmax(180px,1fr)_100px_60px] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-[11px] font-semibold text-muted">
+        <div className="hidden grid-cols-[minmax(250px,1.65fr)_100px_120px_minmax(180px,1fr)_100px_60px] gap-4 border-b border-border bg-surface-muted px-5 py-3 text-[11px] font-semibold text-muted lg:grid">
           <span>编号 / 产品</span><span>类型</span><span>剂型</span><span>规格（独立记录）</span><span>联系单</span><span className="text-right">操作</span>
         </div>
         {isLoading ? (
           <div className="py-16 text-center text-sm text-muted">正在读取共享产品主数据…</div>
         ) : visibleProducts.length ? visibleProducts.map((product) => (
-          <div key={product.id} className="grid grid-cols-[minmax(250px,1.65fr)_100px_120px_minmax(180px,1fr)_100px_60px] gap-4 border-b border-border/70 px-5 py-4 text-sm last:border-b-0 hover:bg-surface-muted/45">
-            <div className="min-w-0">
+          <div key={product.id} className="grid grid-cols-2 gap-3 border-b border-border/70 px-4 py-4 text-sm last:border-b-0 hover:bg-surface-muted/45 lg:grid-cols-[minmax(250px,1.65fr)_100px_120px_minmax(180px,1fr)_100px_60px] lg:gap-4 lg:px-5">
+            <div className="col-span-2 min-w-0 lg:col-span-1">
               <div className="flex items-center gap-2">
                 <span className="rounded bg-brand-emerald/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-brand-emerald">{product.product_code}</span>
                 <strong className="truncate text-ink">{product.chinese_name}</strong>
               </div>
               <div className="mt-1 truncate text-[11px] text-muted">{product.english_name || '英文名暂未维护'}</div>
             </div>
-            <div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${product.product_type === '制剂' ? 'bg-brand-amber/14 text-brand-amber' : 'bg-brand-blue/12 text-brand-blue'}`}>{product.product_type}</span></div>
-            <div className="text-xs text-body">{product.dosage_form || '未填写'}</div>
-            <div className="flex flex-wrap content-start gap-1.5">{product.variants.filter((item) => item.specification && item.status === '启用').slice(0, 5).map((item) => <span key={item.id} className="rounded border border-brand-blue/15 bg-brand-blue/5 px-2 py-0.5 text-[10px] text-brand-blue">{item.specification}</span>)}{product.variants.filter((item) => item.specification && item.status === '启用').length > 5 && <span className="text-[10px] text-subtle">+{product.variants.filter((item) => item.specification && item.status === '启用').length - 5}</span>}{!product.variants.some((item) => item.specification && item.status === '启用') && <span className="text-xs text-subtle">尚无启用规格</span>}</div>
-            <div><strong className="text-ink">{product.contact_sheet_count}</strong><span className="ml-1 text-xs text-muted">张</span><div className="mt-1 text-[10px] text-subtle">{product.contact_row_count} 条记录</div></div>
+            <div><div className="mb-1 text-[10px] font-semibold text-subtle lg:hidden">产品类型</div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${product.product_type === '制剂' ? 'bg-brand-amber/14 text-brand-amber' : 'bg-brand-blue/12 text-brand-blue'}`}>{product.product_type}</span></div>
+            <div className="text-xs text-body"><div className="mb-1 text-[10px] font-semibold text-subtle lg:hidden">剂型</div>{product.dosage_form || '未填写'}</div>
+            <div className="col-span-2 flex flex-wrap content-start gap-1.5 lg:col-span-1"><div className="w-full text-[10px] font-semibold text-subtle lg:hidden">启用规格</div>{product.variants.filter((item) => item.specification && item.status === '启用').slice(0, 5).map((item) => <span key={item.id} className="rounded border border-brand-blue/15 bg-brand-blue/5 px-2 py-0.5 text-[10px] text-brand-blue">{item.specification}</span>)}{product.variants.filter((item) => item.specification && item.status === '启用').length > 5 && <span className="text-[10px] text-subtle">+{product.variants.filter((item) => item.specification && item.status === '启用').length - 5}</span>}{!product.variants.some((item) => item.specification && item.status === '启用') && <span className="text-xs text-subtle">尚无启用规格</span>}</div>
+            <div><div className="mb-1 text-[10px] font-semibold text-subtle lg:hidden">联系单引用</div><strong className="text-ink">{product.contact_sheet_count}</strong><span className="ml-1 text-xs text-muted">张</span><div className="mt-1 text-[10px] text-subtle">{product.contact_row_count} 条记录</div></div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => openEdit(product)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:border-brand-cyan/40 hover:text-brand-cyan" aria-label="编辑产品"><Edit2 className="h-4 w-4" /></button>
             </div>
@@ -296,9 +297,12 @@ export function ProductMasterData() {
       {showForm && (
         <Dialog ariaLabel={editing ? '编辑产品主数据' : '新增产品主数据'} onClose={() => !isSaving && setShowForm(false)}>
           <form onSubmit={saveProduct} className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-surface shadow-2xl">
-            <div className="border-b border-border px-6 py-5">
-              <h3 className="font-heading text-lg font-bold text-ink">{editing ? `编辑产品 ${editing.product_code}` : '新增产品主数据'}</h3>
-              <p className="mt-1 text-xs text-muted">产品名称可直接纠正；规格作为独立记录新增、修正或停用，历史引用不会被覆盖。</p>
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-surface/95 px-6 py-5 backdrop-blur">
+              <div>
+                <h3 className="font-heading text-lg font-bold text-ink">{editing ? `编辑产品 ${editing.product_code}` : '新增产品主数据'}</h3>
+                <p className="mt-1 text-xs text-muted">产品名称可直接纠正；规格作为独立记录新增、修正或停用，历史引用不会被覆盖。</p>
+              </div>
+              <IconButton onClick={() => setShowForm(false)} label="关闭产品主数据表单" icon={<X className="h-5 w-5" />} disabled={isSaving} />
             </div>
             <div className="space-y-4 p-6">
               <section className="grid gap-4 rounded-xl border border-border bg-surface-muted/30 p-4 md:grid-cols-2">

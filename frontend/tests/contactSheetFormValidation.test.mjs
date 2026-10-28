@@ -1,13 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  normalizeDecimalInput,
   normalizeContactSheetSpecification,
   validateContactSheetForm
 } from '../src/services/contactSheetFormValidation.ts';
 
+test('联系单小数输入始终保留小数点前的零', () => {
+  assert.equal(normalizeDecimalInput('.2'), '0.2');
+  assert.equal(normalizeDecimalInput('0.2'), '0.2');
+  assert.equal(normalizeDecimalInput('12.5'), '12.5');
+  assert.equal(normalizeDecimalInput(''), '');
+});
+
 test('联系单表单把必填错误返回到对应字段', () => {
   assert.deepEqual(validateContactSheetForm({
-    businessType: '制剂',
+    businessType: '原料药',
     contractId: '',
     materialNo: ' ',
     productName: '',
@@ -24,9 +32,22 @@ test('联系单表单把必填错误返回到对应字段', () => {
   });
 });
 
+test('制剂联系单允许暂空物料号，原料药仍然必填', () => {
+  const base = {
+    contractId: 'contract-1',
+    materialNo: ' ',
+    productName: '注射用头孢唑林钠',
+    unitPrice: 0.225,
+    quantity: 78000,
+    unit: '支'
+  };
+  assert.equal(validateContactSheetForm({ ...base, businessType: '制剂' }).materialNo, undefined);
+  assert.equal(validateContactSheetForm({ ...base, businessType: '原料药' }).materialNo, '请填写物料号。');
+});
+
 test('正常新建联系单必须选择正式产品规格，历史兼容可显式放行', () => {
   const base = {
-    businessType: '制剂', contractId: 'contract-1', materialNo: 'DEMO-MAT-001', productName: 'DEMO 虚构粉针剂',
+    businessType: '制剂', contractId: 'contract-1', materialNo: 'DEMO-M-01230', productName: '注射用头孢唑林钠',
     unitPrice: 0.225, quantity: 78000, unit: '支'
   };
   assert.equal(validateContactSheetForm({ ...base, requiresProductVariant: true }).productVariantId, '请从产品主数据中选择已有的产品规格。');
@@ -37,8 +58,8 @@ test('联系单表单接受去除首尾空格后有效的数据', () => {
   assert.deepEqual(validateContactSheetForm({
     businessType: '制剂',
     contractId: 'contract-1',
-    materialNo: ' DEMO-MAT-001 ',
-    productName: ' DEMO 虚构粉针剂 ',
+    materialNo: ' DEMO-M-01230 ',
+    productName: ' 注射用头孢唑林钠 ',
     unitPrice: 0.225,
     quantity: 78000,
     unit: ' 支 '
@@ -49,8 +70,8 @@ test('人民币制剂联系单必须维护每箱装量以支持收货确认函',
   const base = {
     businessType: '制剂',
     contractId: 'contract-rmb',
-    materialNo: 'DEMO-MAT-001',
-    productName: 'DEMO 虚构粉针剂',
+    materialNo: 'DEMO-M-01230',
+    productName: '注射用头孢唑林钠',
     unitPrice: 2.12,
     quantity: 100000,
     unit: '支',
@@ -68,8 +89,8 @@ test('联系单计量单位只接受支、盒、瓶、kg和十亿', () => {
   const base = {
     businessType: '原料药',
     contractId: 'contract-1',
-    materialNo: 'DEMO-RAW-001',
-    productName: 'DEMO 虚构原料',
+    materialNo: 'S20032',
+    productName: '头孢曲松钠',
     unitPrice: 730,
     quantity: 500,
   };

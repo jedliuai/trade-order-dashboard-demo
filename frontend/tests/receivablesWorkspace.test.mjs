@@ -3,10 +3,12 @@ import test from 'node:test';
 
 import {
   calculateCurrentReceivables,
+  calculateShipmentPaymentCoverage,
   filterCurrentReceivableFacts,
   groupPaymentsByCustomer,
   selectReceivableDashboardContracts,
   summarizeCurrentReceivableRmb,
+  summarizeShipmentPaymentCoverage,
   summarizeShipmentSettlement,
   summarizeOutstandingContractsRmb
 } from '../src/services/receivablesWorkspace.ts';
@@ -50,7 +52,7 @@ test('当前应收排除未发货，合同级回款按先发先抵且同批产�
   assert.equal(result.facts.some((row) => row.shipmentId === 'sh3'), false);
 });
 
-test('指定发货收款直接抵扣目标发货，其余合同级款继续按先发先抵', () => {
+test('历史收款即使保留发货引用也统一按合同内先发先抵', () => {
   const result = calculateCurrentReceivables({
     contracts: [contract], sheets, shipments, shipmentItems,
     payments: [
@@ -61,8 +63,8 @@ test('指定发货收款直接抵扣目标发货，其余合同级款继续按�
     rateForDate: () => 7
   });
 
-  assert.equal(result.facts.filter((row) => row.shipmentId === 'sh1').reduce((sum, row) => sum + row.outstandingAmount, 0), 30);
-  assert.equal(result.facts.filter((row) => row.shipmentId === 'sh2').reduce((sum, row) => sum + row.outstandingAmount, 0), 20);
+  assert.equal(result.facts.filter((row) => row.shipmentId === 'sh1').reduce((sum, row) => sum + row.outstandingAmount, 0), 0);
+  assert.equal(result.facts.filter((row) => row.shipmentId === 'sh2').reduce((sum, row) => sum + row.outstandingAmount, 0), 50);
 });
 
 test('发货级收款状态使用先发先抵后的余额而不是合同是否全部收齐', () => {
@@ -85,6 +87,60 @@ test('发货级收款状态使用先发先抵后的余额而不是合同是否�
   assert.equal(summarizeShipmentSettlement(['sh1'], 100, [{
     shipmentId: 'sh1', outstandingAmount: 100
   }]).status, '未收款');
+});
+
+test('准备中、已发货和已开票统一按发货日期先后判断是否收齐', () => {
+  const unifiedShipments = [
+    { id: 'sh1', contract_id: 'c1', shipment_no: 'SH-1', shipment_date: '2026-02-01', amount: 100, status: '已发货' },
+    { id: 'sh2', contract_id: 'c1', shipment_no: 'SH-2', shipment_date: '2026-03-01', amount: 100, status: '准备中' },
+    { id: 'sh3', contract_id: 'c1', shipment_no: 'SH-3', shipment_date: '2026-04-01', amount: 100, status: '已发货' }
+  ];
+  const facts = calculateShipmentPaymentCoverage({
+    contracts: [contract],
+    shipments: unifiedShipments,
+    shipmentItems: [],
+    payments: [{ id: 'p1', contract_id: 'c1', payment_date: '2026-01-15', amount: 250, currency: 'USD' }],
+    asOfDate: '2026-04-30'
+  });
+
+  assert.deepEqual(facts.map((row) => [row.shipmentId, row.paidAmount, row.outstandingAmount]), [
+    ['sh1', 100, 0],
+    ['sh2', 100, 0],
+    ['sh3', 50, 50]
+  ]);
+  assert.equal(summarizeShipmentPaymentCoverage(['sh1'], facts).status, '已收齐');
+  assert.equal(summarizeShipmentPaymentCoverage(['sh2'], facts).status, '已收齐');
+  assert.equal(summarizeShipmentPaymentCoverage(['sh3'], facts).status, '未收齐');
+});
+
+test('收款补齐后状态自动变成已收齐且不受发货阶段影响', () => {
+  const baseShipment = { id: 'sh-plan', contract_id: 'c1', shipment_no: 'SH-PLAN', shipment_date: '2026-05-01', amount: 100 };
+  const calculate = (status) => calculateShipmentPaymentCoverage({
+    contracts: [contract],
+    shipments: [{ ...baseShipment, status }],
+    shipmentItems: [],
+    payments: [{ id: 'p1', contract_id: 'c1', payment_date: '2026-04-20', amount: 100, currency: 'USD' }],
+    asOfDate: '2026-05-31'
+  });
+
+  assert.equal(summarizeShipmentPaymentCoverage(['sh-plan'], calculate('准备中')).status, '已收齐');
+  assert.equal(summarizeShipmentPaymentCoverage(['sh-plan'], calculate('已发货')).status, '已收齐');
+});
+
+test('取消记录不再占用合同回款', () => {
+  const facts = calculateShipmentPaymentCoverage({
+    contracts: [contract],
+    shipments: [
+      { id: 'voided', contract_id: 'c1', shipment_no: 'SH-VOID', shipment_date: '2026-01-01', amount: 100, status: '取消' },
+      { id: 'active', contract_id: 'c1', shipment_no: 'SH-ACTIVE', shipment_date: '2026-02-01', amount: 100, status: '准备中' }
+    ],
+    shipmentItems: [],
+    payments: [{ id: 'p1', contract_id: 'c1', payment_date: '2026-01-15', amount: 100, currency: 'USD' }],
+    asOfDate: '2026-02-28'
+  });
+
+  assert.deepEqual(facts.map((row) => row.shipmentId), ['active']);
+  assert.equal(summarizeShipmentPaymentCoverage(['active'], facts).status, '已收齐');
 });
 
 test('预付款超过已发货金额时应收最低为零并保留预收款余额', () => {

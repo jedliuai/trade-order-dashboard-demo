@@ -72,7 +72,7 @@ export function CustomerOrderManager({ customers }: CustomerOrderManagerProps) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-heading text-sm font-bold text-ink">客户下拉展示顺序</h3>
-          <p className="mt-1 text-[11px] leading-5 text-muted">顺序保存在这台电脑的演示数据库中，刷新后仍会保留；不会修改客户 ID、合同关联或历史业务数据。</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted">顺序保存在当前 本地数据库 账号中，换浏览器或设备登录后也会恢复；不会修改客户 ID、合同关联或历史业务数据。</p>
         </div>
         <Button
           tone="secondary"

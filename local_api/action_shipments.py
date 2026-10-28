@@ -1,7 +1,9 @@
 """Atomic batch, single shipment, and physical shipment-group actions."""
+import copy
 from collections import defaultdict
 from .store import ApiError, iso_date
 from .action_common import object_data, row_list, owned, update, trimmed, remove_children
+from .payment_progress import china_today
 
 
 def replace_contact_sheet_batches(tx, target_contact_sheet_id, batch_rows):
@@ -27,6 +29,8 @@ def add_items(tx, shipment, item_rows):
         sheet = owned(tx, 'contact_sheets', item.get('contact_sheet_id'))
         if sheet['contract_id'] != shipment['contract_id']:
             raise ApiError('发货明细不属于当前合同')
+        if shipment.get('status') == '已发货' and not trimmed(sheet.get('material_no')):
+            raise ApiError('请先补齐联系单物料号，再确认实际发货')
         if item.get('batch_id'):
             owned(tx, 'batches', item['batch_id'])
         item['batch_id'] = item.get('batch_id') or None
@@ -50,6 +54,8 @@ def create_shipment_with_items(tx, shipment_data, item_rows):
 
 def replace_shipment_items(tx, target_shipment_id, item_rows, target_payment_status='需人工确认'):
     shipment = owned(tx, 'shipments', target_shipment_id)
+    if shipment['status'] != '准备中':
+        raise ApiError('已确认或已作废的发货事实不可修改')
     if shipment.get('shipment_group_id'):
         raise ApiError('合并发货必须整单维护')
     remove_children(tx, 'shipment_items', 'shipment_id', target_shipment_id)
@@ -65,8 +71,13 @@ def update_shipment_with_items(tx, target_shipment_id, shipment_data, item_rows,
         raise ApiError('发货编辑不能改变合同、分组或贸易术语快照')
     if 'shipment_no' in data:
         data['shipment_no'] = trimmed(data['shipment_no'], True)
+    count = replace_shipment_items(tx, target_shipment_id, item_rows, target_payment_status)
     update(shipment, data)
-    return replace_shipment_items(tx, target_shipment_id, item_rows, target_payment_status)
+    if shipment.get('status') == '已发货':
+        for item in tx.rows['shipment_items']:
+            if item['shipment_id'] == target_shipment_id and not trimmed(owned(tx, 'contact_sheets', item['contact_sheet_id']).get('material_no')):
+                raise ApiError('请先补齐联系单物料号，再确认实际发货')
+    return count
 
 
 def grouped_items(tx, customer_id, items, currency=None, incoterm=None):
@@ -126,3 +137,63 @@ def confirm_shipment_group_dispatched(tx, target_group_id, actual_shipment_date,
                    'notes': actual_notes if actual_notes is not None else group.get('notes')})
     add_group_children(tx, group, grouped, contract_status_rows or [])
     return group['id']
+
+
+def ensure_uninvoiced(tx, group_id):
+    ids = {s['id'] for s in tx.rows['shipments'] if s.get('shipment_group_id') == group_id}
+    if any(i['shipment_id'] in ids for table in ('invoices', 'invoice_shipments') for i in tx.rows[table]):
+        raise ApiError('该发货已有开票记录，请先撤销开票')
+    return ids
+
+
+def update_preparing_shipment_group_with_items(tx, target_group_id, group_data, item_rows, contract_status_rows=None):
+    group = owned(tx, 'shipment_groups', target_group_id)
+    if group['status'] != '准备中':
+        raise ApiError('只有准备中的发货安排可以编辑')
+    data = object_data(group_data, tx.user)
+    if set(data) - {'shipment_no', 'shipment_date', 'notes'}:
+        raise ApiError('发货安排不能改变客户、币种和贸易术语')
+    if 'shipment_no' in data:
+        data['shipment_no'] = trimmed(data['shipment_no'], True)
+    grouped, _, _ = grouped_items(tx, group['customer_id'], item_rows, group['currency'], group['incoterm'])
+    ensure_uninvoiced(tx, target_group_id)
+    remove_children(tx, 'shipments', 'shipment_group_id', target_group_id)
+    update(group, data)
+    add_group_children(tx, group, grouped, contract_status_rows or [])
+    return target_group_id
+
+
+def delete_preparing_shipment_group(tx, target_group_id):
+    group = owned(tx, 'shipment_groups', target_group_id)
+    if group['status'] != '准备中':
+        raise ApiError('只有准备中的发货安排可以删除')
+    ensure_uninvoiced(tx, target_group_id)
+    tx.remove('shipment_groups', target_group_id)
+    return target_group_id
+
+
+def void_and_copy_shipment_group(tx, target_group_id, replacement_shipment_no, replacement_shipment_date=None):
+    group = owned(tx, 'shipment_groups', target_group_id)
+    if group['status'] != '已发货':
+        raise ApiError('只有已确认实际发货的记录可以作废并复制')
+    replacement_shipment_no = trimmed(replacement_shipment_no, True)
+    replacement_shipment_date = replacement_shipment_date or china_today().isoformat()
+    iso_date(replacement_shipment_date, '新发货安排日期')
+    ids = ensure_uninvoiced(tx, target_group_id)
+    items = [{k: copy.deepcopy(item.get(k)) for k in
+              ('contact_sheet_id', 'batch_id', 'material_no', 'shipped_quantity', 'unit_price', 'notes')}
+             for item in tx.rows['shipment_items'] if item['shipment_id'] in ids]
+    if not items:
+        raise ApiError('原发货记录没有可复制明细')
+    for payment in tx.rows['payments']:
+        if payment.get('shipment_id') in ids:
+            update(payment, {'shipment_id': None})
+    for shipment in tx.rows['shipments']:
+        if shipment['id'] in ids:
+            update(shipment, {'status': '取消'})
+    update(group, {'status': '取消'})
+    return create_shipment_group_with_items(tx, {
+        'customer_id': group['customer_id'], 'shipment_no': replacement_shipment_no,
+        'shipment_date': replacement_shipment_date, 'status': '准备中',
+        'notes': '\n'.join(filter(None, [group.get('notes'), f"由已作废发货单 {group['shipment_no']} 复制"])),
+    }, items)

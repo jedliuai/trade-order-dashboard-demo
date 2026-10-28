@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from local_api.exports import COMMANDS, DOCX_MIME, XLSX_MIME, export_file  # noqa: E402
+from local_api.exports import COMMANDS, LOCAL_ONLY_COMMANDS, DOCX_MIME, XLSX_MIME, export_file  # noqa: E402
 from local_api.metrics import operating_metrics, shipment_profits  # noqa: E402
 from local_api.seed import build_seed  # noqa: E402
 from local_api.store import Store  # noqa: E402
@@ -204,7 +204,7 @@ def build(output: Path, as_of: date) -> list[str]:
                         artifact_counts["telegram"] += 1
 
                 user_exports: dict[str, dict[str, object]] = {}
-                if set(EXPORT_COMMANDS) != COMMANDS:
+                if set(EXPORT_COMMANDS) != COMMANDS - LOCAL_ONLY_COMMANDS:
                     raise RuntimeError("导出命令集合已变化，请先确认公网演示产物口径")
                 for command in EXPORT_COMMANDS:
                     filename, mime, content = export_file(store, command, {}, store_user)

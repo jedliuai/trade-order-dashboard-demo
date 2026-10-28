@@ -6,6 +6,7 @@ import { resolveContactSheetNavigationTarget } from '../services/contactSheetNav
 import { resolveContactSheetStage } from '../services/contactSheetStage';
 import { isContactSheetHistory, sortContactSheetsByCreatedAt } from '../services/contactSheetWorkspace';
 import {
+  normalizeDecimalInput,
   normalizeContactSheetSpecification,
   validateContactSheetForm,
   type ContactSheetFormErrors,
@@ -25,14 +26,19 @@ import { ColorIconBadge, type ColorIconTone } from '../components/ColorIconBadge
 import { PaginationControls } from '../components/PaginationControls';
 import { usePagedRows } from '../hooks/usePagedRows';
 import { sortCustomersForDisplay } from '../services/customerOrdering';
+import { sortContractsByCustomerOrder } from '../services/customerOrderingSort';
 import { formatLocalDate } from '../services/dateUtils';
 import { resolveBoxArtworkReminder } from '../services/boxArtworkReminder';
 import { validateBatchQuantityTotal } from '../services/batchTracking';
+import { resolvePackagingCopyVersion } from '../services/contactSheetPackaging';
+import { isMaterialNumberRequiredAtEntry } from '../services/materialNumberRules';
 import {
   loadMasterProducts,
   loadPackagingProfiles,
+  loadPackagingVersions,
   type MasterProduct,
-  type PackagingProfile
+  type PackagingProfile,
+  type PackagingProfileVersion
 } from '../services/masterDataService';
 import { masterSpecificationKey } from '../services/masterSpecification';
 import { CONTACT_SHEET_UNIT_OPTIONS, normalizeContactSheetUnit } from '../services/formOptions';
@@ -158,13 +164,16 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
   const [specification, setSpecification] = useState('');
   const [packaging, setPackaging] = useState('');
   const [packagingVersionId, setPackagingVersionId] = useState('');
+  const [allPackagingProfiles, setAllPackagingProfiles] = useState<PackagingProfile[]>([]);
   const [packagingProfiles, setPackagingProfiles] = useState<PackagingProfile[]>([]);
+  const [packagingVersions, setPackagingVersions] = useState<PackagingProfileVersion[]>([]);
   const [masterProducts, setMasterProducts] = useState<MasterProduct[]>([]);
   const [masterProductsError, setMasterProductsError] = useState('');
   const [packagingProfilesError, setPackagingProfilesError] = useState('');
   const [packagingConfirmedDate, setPackagingConfirmedDate] = useState('');
   const [qualityStandard, setQualityStandard] = useState('USP-NF2025');
   const [unitPrice, setUnitPrice] = useState(0);
+  const [unitPriceInput, setUnitPriceInput] = useState('');
   const [quantity, setQuantity] = useState(0);
   const [unit, setUnit] = useState('支');
   const [pcsPerCarton, setPcsPerCarton] = useState<number | ''>('');
@@ -203,6 +212,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     packagingConfirmedDate,
     qualityStandard,
     unitPrice,
+    unitPriceInput,
     quantity,
     unit,
     pcsPerCarton,
@@ -246,17 +256,21 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
   useEffect(() => {
     let active = true;
     const refreshMasterData = () => {
-      Promise.all([loadPackagingProfiles(), loadMasterProducts()])
-        .then(([profileRows, productRows]) => {
+      Promise.all([loadPackagingProfiles(), loadPackagingVersions(), loadMasterProducts()])
+        .then(([profileRows, versionRows, productRows]) => {
           if (!active) return;
+          setAllPackagingProfiles(profileRows);
           setPackagingProfiles(profileRows.filter((row) => row.is_active && row.review_status === 'verified'));
+          setPackagingVersions(versionRows);
           setMasterProducts(productRows);
           setPackagingProfilesError('');
           setMasterProductsError('');
         })
         .catch((error) => {
           if (!active) return;
+          setAllPackagingProfiles([]);
           setPackagingProfiles([]);
+          setPackagingVersions([]);
           setMasterProducts([]);
           const message = error instanceof Error ? error.message : String(error);
           setPackagingProfilesError(message);
@@ -290,41 +304,86 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     clearFormError('productName');
   };
 
-  const packagingProfileOptions = useMemo(() => packagingProfiles
-    .slice()
-    .sort((left, right) => {
-      const leftMatch = Number(left.material_no === materialNo) * 2 + Number(left.product_name === productName);
-      const rightMatch = Number(right.material_no === materialNo) * 2 + Number(right.product_name === productName);
-      return rightMatch - leftMatch || left.packaging_code.localeCompare(right.packaging_code, 'zh-CN');
-    })
-    .map((profile) => ({
+  const packagingProfileOptions = useMemo(() => {
+    const currentOptions = packagingProfiles
+      .slice()
+      .sort((left, right) => {
+        const leftMatch = Number(left.material_no === materialNo) * 2 + Number(left.product_name === productName);
+        const rightMatch = Number(right.material_no === materialNo) * 2 + Number(right.product_name === productName);
+        return rightMatch - leftMatch || left.packaging_code.localeCompare(right.packaging_code, 'zh-CN');
+      })
+      .map((profile) => ({
       value: profile.version_id,
       label: `${profile.packaging_code}｜${profile.product_name}${profile.specification ? `｜${profile.specification}` : ''}`,
       description: `${profile.workshop || '未填车间'}｜外箱外径 ${profile.carton_outer_length_mm && profile.carton_outer_width_mm && profile.carton_outer_height_mm ? `${profile.carton_outer_length_mm}×${profile.carton_outer_width_mm}×${profile.carton_outer_height_mm} mm` : '待维护'}｜${profile.packaging_description}｜${Number(profile.quantity_per_carton).toLocaleString()} ${profile.quantity_unit}`,
       searchText: [profile.packaging_code, profile.product_name, profile.product_search_text, profile.material_no, profile.specification, profile.workshop, profile.packing_method, profile.packaging_description, profile.customer_name, profile.carton_outer_length_mm, profile.carton_outer_width_mm, profile.carton_outer_height_mm].join(' ')
-    })), [materialNo, packagingProfiles, productName]);
+      }));
+    if (!packagingVersionId || currentOptions.some((option) => option.value === packagingVersionId)) return currentOptions;
+
+    const linkedVersion = packagingVersions.find((version) => version.id === packagingVersionId);
+    const linkedProfile = linkedVersion
+      ? allPackagingProfiles.find((profile) => profile.profile_id === linkedVersion.profile_id)
+      : null;
+    const statusLabel = !linkedVersion
+      ? '已绑定版本'
+      : !linkedVersion.is_current
+        ? '历史版本 · 当前联系单已绑定'
+        : linkedProfile?.is_active === false
+          ? '已停用版本 · 当前联系单已绑定'
+          : '非当前可选版本 · 当前联系单已绑定';
+    const versionLabel = linkedVersion ? `V${linkedVersion.version_no}` : '版本信息暂不可用';
+    const description = linkedVersion?.packaging_description || packaging || '已绑定包装';
+    return [{
+      value: packagingVersionId,
+      label: `${linkedProfile?.packaging_code || '已绑定包装'}｜${versionLabel}（${statusLabel}）`,
+      description: `${description}｜单纯打开或保存联系单不会替换此版本`,
+      searchText: [linkedProfile?.packaging_code, linkedProfile?.product_name, linkedProfile?.material_no, linkedVersion?.packaging_description, packaging, statusLabel].join(' ')
+    }, ...currentOptions];
+  }, [allPackagingProfiles, materialNo, packaging, packagingProfiles, packagingVersionId, packagingVersions, productName]);
 
   const selectedPackagingProfile = useMemo(
     () => packagingProfiles.find((item) => item.version_id === packagingVersionId) || null,
     [packagingProfiles, packagingVersionId]
   );
+  const selectedHistoricalPackagingVersion = useMemo(
+    () => selectedPackagingProfile ? null : packagingVersions.find((item) => item.id === packagingVersionId) || null,
+    [packagingVersionId, packagingVersions, selectedPackagingProfile]
+  );
+  const selectedHistoricalPackagingProfile = useMemo(
+    () => selectedHistoricalPackagingVersion
+      ? allPackagingProfiles.find((item) => item.profile_id === selectedHistoricalPackagingVersion.profile_id) || null
+      : null,
+    [allPackagingProfiles, selectedHistoricalPackagingVersion]
+  );
 
   const handlePackagingVersionChange = (versionId: string) => {
     setPackagingVersionId(versionId);
-    const profile = packagingProfiles.find((item) => item.version_id === versionId);
-    if (!profile) {
+    if (!versionId) {
       setPackaging('');
       setPcsPerCarton('');
       return;
     }
-    setPackaging(profile.packaging_description);
-    setPcsPerCarton(Number(profile.quantity_per_carton));
-    clearFormError('pcsPerCarton');
+    const profile = packagingProfiles.find((item) => item.version_id === versionId);
+    if (profile) {
+      setPackaging(profile.packaging_description);
+      setPcsPerCarton(Number(profile.quantity_per_carton));
+      clearFormError('pcsPerCarton');
+      return;
+    }
+    const historicalVersion = packagingVersions.find((item) => item.id === versionId);
+    if (historicalVersion) {
+      setPackaging(historicalVersion.packaging_description);
+      setPcsPerCarton(Number(historicalVersion.quantity_per_carton));
+      clearFormError('pcsPerCarton');
+    }
   };
-  const selectableContracts = useMemo(
-    () => contracts.filter(contract => !contract.archived && !contract.is_historical),
-    [contracts]
-  );
+  const selectableContracts = useMemo(() => {
+    const orderedCustomerIds = sortCustomersForDisplay(customers).map(customer => customer.id);
+    return sortContractsByCustomerOrder(
+      contracts.filter(contract => !contract.archived && !contract.is_historical),
+      orderedCustomerIds
+    );
+  }, [contracts, customers]);
   const focusedSheet = useMemo(
     () => resolveContactSheetNavigationTarget(sheets, navigationTarget),
     [sheets, navigationTarget]
@@ -456,6 +515,13 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     });
   };
 
+  const handleUnitPriceChange = (value: string) => {
+    const normalizedValue = normalizeDecimalInput(value);
+    setUnitPriceInput(normalizedValue);
+    setUnitPrice(Number.parseFloat(normalizedValue) || 0);
+    clearFormError('unitPrice');
+  };
+
   // Handle stagger month auto-expiry
   const handleProdDateChange = (val: string) => {
     setProductionDate(val);
@@ -522,6 +588,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     setPackagingConfirmedDate('');
     setQualityStandard('USP-NF2025');
     setUnitPrice(0);
+    setUnitPriceInput('');
     setQuantity(0);
     setUnit('支');
     setGrossWeightKg('');
@@ -553,6 +620,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     setPackagingConfirmedDate(s.packaging_confirmed_date);
     setQualityStandard(s.quality_standard);
     setUnitPrice(s.unit_price);
+    setUnitPriceInput(String(s.unit_price));
     setQuantity(s.quantity);
     setUnit(CONTACT_SHEET_UNIT_OPTIONS.includes(normalizeContactSheetUnit(s.unit) as (typeof CONTACT_SHEET_UNIT_OPTIONS)[number]) ? normalizeContactSheetUnit(s.unit) : '支');
     setProductionDate(s.production_date);
@@ -584,15 +652,12 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
       ? sourceRecord
       : exactSnapshotCandidate
         || (s.business_type === '原料药' && activeSnapshotCandidates.length === 1 ? activeSnapshotCandidates[0] : undefined);
-    const targetCustomerId = contracts.find((contract) => contract.id === s.contract_id)?.customer_id;
-    const currentPackaging = copyVariant
-      ? packagingProfiles
-          .filter((profile) => (
-            profile.product_variant_id === copyVariant.variant.id
-            && (!profile.customer_id || profile.customer_id === targetCustomerId)
-          ))
-          .sort((left, right) => Number(Boolean(right.customer_id)) - Number(Boolean(left.customer_id)))[0] || null
-      : null;
+    const packagingResolution = resolvePackagingCopyVersion(
+      s.packaging_profile_version_id,
+      packagingVersions,
+      packagingProfiles
+    );
+    const currentPackaging = packagingResolution.status === 'resolved' ? packagingResolution.profile : null;
     setEditingId(null);
     setBusinessType(s.business_type);
     setFormErrors({});
@@ -607,6 +672,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     setPackagingConfirmedDate('');
     setQualityStandard(s.quality_standard);
     setUnitPrice(s.unit_price);
+    setUnitPriceInput(String(s.unit_price));
     setQuantity(s.quantity);
     setUnit(CONTACT_SHEET_UNIT_OPTIONS.includes(normalizeContactSheetUnit(s.unit) as (typeof CONTACT_SHEET_UNIT_OPTIONS)[number]) ? normalizeContactSheetUnit(s.unit) : '支');
     setProductionDate(s.production_date);
@@ -621,6 +687,23 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
     setPcsPerCarton(currentPackaging?.quantity_per_carton || '');
     setGrossWeightKg('');
     setShowFormModal(true);
+    if (packagingResolution.status === 'resolved' && packagingResolution.upgraded) {
+      notify({
+        title: '包装已切换到当前版本',
+        message: `来源联系单绑定的是同一模板的历史版本，复制件已改用 ${currentPackaging?.packaging_code || '该模板'} V${currentPackaging?.version_no || ''}。`,
+        tone: 'info',
+        duration: 7000
+      });
+    } else if (packagingResolution.status === 'unavailable') {
+      notify({
+        title: '包装需要重新确认',
+        message: packagingResolution.reason === 'version_missing'
+          ? '无法读取来源联系单绑定的包装版本，已保持为空，没有猜测其他包装。'
+          : '来源包装模板当前没有启用且已核验的版本，已保持为空，没有猜测其他包装。',
+        tone: 'warning',
+        duration: 7000
+      });
+    }
   };
 
   const loadContactSheetHistory = async (sheet: ContactSheet) => {
@@ -714,6 +797,31 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
         title: '确认修改联系单号？',
         message: `所属合同：${editingContract?.contract_no || editingSheet.contract_no}\n产品：${editingSheet.product_name}\n物料号：${editingSheet.material_no}\n原联系单号：${editingSheet.contact_sheet_no || '未填写'}\n新联系单号：${contactSheetNo.trim() || '清空'}\n\n联系单号会影响记录识别，请再次核对后继续。`,
         confirmLabel: '确认修改',
+        tone: 'warning'
+      });
+      if (!confirmed) return;
+    }
+
+    if (
+      editingSheet
+      && String(editingSheet.packaging_profile_version_id || '') !== packagingVersionId
+    ) {
+      const describePackagingVersion = (versionId: string | null | undefined) => {
+        if (!versionId) return '未选择包装模板（生产车间留空）';
+        const currentProfile = allPackagingProfiles.find(profile => profile.version_id === versionId);
+        if (currentProfile) {
+          return `${currentProfile.packaging_code} V${currentProfile.version_no} · 车间 ${currentProfile.workshop || '未填写'}`;
+        }
+        const version = packagingVersions.find(item => item.id === versionId);
+        const profile = version
+          ? allPackagingProfiles.find(item => item.profile_id === version.profile_id)
+          : null;
+        return `${profile?.packaging_code || '历史包装版本'}${version ? ` V${version.version_no}` : ''} · 车间 ${version?.workshop || profile?.workshop || '未填写'}`;
+      };
+      const confirmed = await confirm({
+        title: '确认更换整套包装参数？',
+        message: `原包装：${describePackagingVersion(editingSheet.packaging_profile_version_id)}\n新包装：${describePackagingVersion(packagingVersionId)}\n\n生产车间、包装尺寸和装箱参数会作为一个整体切换，请确认已选择正确的包装模板。`,
+        confirmLabel: '确认更换',
         tone: 'warning'
       });
       if (!confirmed) return;
@@ -896,8 +1004,6 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
       contact_sheet_id: selectedSheetId,
       batch_no: b.batch_no,
       batch_quantity: b.batch_quantity,
-      production_date: targetSheet.production_date,
-      expiry_date: targetSheet.expiry_date,
       warehouse_date: targetSheet.actual_warehousing_date,
       release_date: targetSheet.actual_release_date,
       notes: '分拆录入'
@@ -934,7 +1040,10 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
   };
 
   const handleOpenMaterialsInfo = (materialNo: string) => {
-    notify({ title: '本地物料信息', message: `演示物料编号：${materialNo || '未填写'}。产品规格和包装参数可在本地主数据页面查看。`, tone: 'info' });
+    const product = masterProducts.find(product => product.chinese_name === sheets.find(sheet => sheet.material_no === materialNo)?.product_name);
+    notify({ title: '本地物料资料', message: product
+      ? `${materialNo} · ${product.chinese_name}\n${product.english_name || ''}\n${product.notes || '可在产品主数据中维护更多资料。'}`
+      : `${materialNo} · 可在产品主数据中查看或维护虚构物料资料。`, tone: 'info' });
   };
 
   const handleReturnToContract = () => {
@@ -1212,15 +1321,26 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                           {s.is_historical && <StatusBadge tone="neutral">历史数据</StatusBadge>}
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            aria-label={`查询物料 ${s.material_no} 的成本`}
-                            onClick={(event) => { event.stopPropagation(); handleOpenMaterialsInfo(s.material_no); }}
-                            className="inline-flex items-center gap-1 rounded-md border border-brand-cyan/20 bg-brand-cyan/10 px-2.5 py-1.5 text-sm font-bold text-brand-cyan transition-colors hover:bg-brand-cyan/15"
-                          >
-                            物料 {s.material_no}
-                            <ArrowUpRight className="h-3.5 w-3.5" />
-                          </button>
+                          {String(s.material_no || '').trim() ? (
+                            <button
+                              type="button"
+                              aria-label={`查询物料 ${s.material_no} 的成本`}
+                              onClick={(event) => { event.stopPropagation(); handleOpenMaterialsInfo(s.material_no); }}
+                              className="inline-flex items-center gap-1 rounded-md border border-brand-cyan/20 bg-brand-cyan/10 px-2.5 py-1.5 text-sm font-bold text-brand-cyan transition-colors hover:bg-brand-cyan/15"
+                            >
+                              物料 {s.material_no}
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); handleOpenEdit(s); }}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-brand-amber/30 bg-brand-amber/10 px-2.5 py-1.5 text-sm font-bold text-brand-amber transition-colors hover:bg-brand-amber/15"
+                            >
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              待补物料号 · 点击补录
+                            </button>
+                          )}
                           <span className="rounded-md border border-border bg-surface-muted px-2.5 py-1.5 text-xs font-medium text-muted">合同 {s.contract_no}</span>
                         </div>
                         <div className="mt-3 truncate text-base font-bold text-ink">{s.product_name}</div>
@@ -1388,7 +1508,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                         <span className="px-1.5 text-subtle">|</span>
                         联系单 <span className="font-bold text-ink">{editingSheet.contact_sheet_no || '未填写'}</span>
                         <span className="px-1.5 text-subtle">|</span>
-                        物料 <span className="font-bold text-ink">{editingSheet.material_no}</span>
+                        物料 <span className="font-bold text-ink">{editingSheet.material_no || '待补录'}</span>
                         <span className="px-1.5 text-subtle">|</span>
                         {editingSheet.product_name}
                       </div>
@@ -1443,11 +1563,11 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                           options={selectableContracts.map(contract => ({
                             value: contract.id,
                             label: `${contract.contract_no} (${contract.customer_name})`,
-                            searchText: contract.contract_no
+                            searchText: [contract.contract_no, contract.customer_name].join(' ')
                           }))}
                           ariaLabel="所属销售合同"
                           placeholder="请选择已有销售合同"
-                          searchPlaceholder="输入合同号搜索"
+                          searchPlaceholder="输入合同号或客户名称搜索"
                           emptyMessage="没有匹配的已有合同"
                           invalid={Boolean(formErrors.contractId)}
                         />
@@ -1459,11 +1579,17 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                         type="text"
                         value={contactSheetNo}
                         onChange={(e) => setContactSheetNo(e.target.value)}
-                        placeholder="如 DEMO-CS-002"
+                        placeholder="如 B260882"
                         className={contactSheetInputClass()}
                       />
                     </FormField>
-                    <FormField label="物料号" required error={formErrors.materialNo} htmlFor="contact-material-no">
+                    <FormField
+                      label="物料号"
+                      required={isMaterialNumberRequiredAtEntry(businessType)}
+                      error={formErrors.materialNo}
+                      hint={businessType === '制剂' ? '可暂时留空；确认实际发货和生成正式生产、发货文件前必须补齐。' : '原料药将直接进入发货流程，必须填写。'}
+                      htmlFor="contact-material-no"
+                    >
                       <input
                         ref={materialNoRef}
                         id="contact-material-no"
@@ -1473,7 +1599,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                           setMaterialNo(e.target.value);
                           clearFormError('materialNo');
                         }}
-                        placeholder="如 DEMO-MAT-003"
+                        placeholder={businessType === '制剂' ? '可稍后补录，如 FF11264' : '如 S20032'}
                         aria-invalid={Boolean(formErrors.materialNo) || undefined}
                         className={contactSheetInputClass(Boolean(formErrors.materialNo))}
                       />
@@ -1549,6 +1675,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                         invalid={Boolean(formErrors.pcsPerCarton)}
                       />
                       {selectedPackagingProfile && <div className="mt-3 grid gap-3 rounded-xl border border-brand-emerald/25 bg-brand-emerald/5 p-3 text-[11px] text-muted sm:grid-cols-2 lg:grid-cols-[minmax(0,1.8fr)_minmax(110px,1fr)_minmax(130px,1fr)_minmax(150px,1.2fr)]"><span><span className="block text-[10px] text-subtle">当前包装</span><strong className="mt-0.5 block text-ink">{selectedPackagingProfile.packaging_description}</strong></span><span><span className="block text-[10px] text-subtle">生产车间</span><strong className="mt-0.5 block text-ink">{selectedPackagingProfile.workshop || '未填写'}</strong></span><span><span className="block text-[10px] text-subtle">每箱装量</span><strong className="mt-0.5 block text-ink">{Number(selectedPackagingProfile.quantity_per_carton).toLocaleString()} {selectedPackagingProfile.quantity_unit}</strong></span><span><span className="block text-[10px] text-subtle">外箱外径</span><strong className="mt-0.5 block text-brand-emerald">{selectedPackagingProfile.carton_outer_length_mm && selectedPackagingProfile.carton_outer_width_mm && selectedPackagingProfile.carton_outer_height_mm ? `${selectedPackagingProfile.carton_outer_length_mm}×${selectedPackagingProfile.carton_outer_width_mm}×${selectedPackagingProfile.carton_outer_height_mm} mm` : '待维护'}</strong></span></div>}
+                      {!selectedPackagingProfile && packagingVersionId && <div className="mt-3 rounded-xl border border-brand-amber/35 bg-brand-amber/5 p-3 text-[11px] leading-5 text-muted"><strong className="block text-brand-amber">当前联系单已绑定{selectedHistoricalPackagingVersion?.is_current ? '非当前可选版本' : '历史包装版本'}：{selectedHistoricalPackagingProfile?.packaging_code || '包装版本'}{selectedHistoricalPackagingVersion ? ` V${selectedHistoricalPackagingVersion.version_no}` : ''}</strong><span className="block text-ink">{selectedHistoricalPackagingVersion?.packaging_description || packaging || '版本详情暂不可用'}</span><span className="block">此处保留的是本单当时实际采用的版本；打开或保存其他字段不会自动替换。</span></div>}
                       {formErrors.pcsPerCarton && <p className="mt-1 text-xs text-brand-rose">{formErrors.pcsPerCarton}</p>}
                     </FormField>}
                     <FormField label={`单价（${selectedContract?.currency || 'USD/RMB'}）`} required error={formErrors.unitPrice} htmlFor="contact-unit-price">
@@ -1558,11 +1685,8 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                         type="number"
                         min="0"
                         step="0.001"
-                        value={unitPrice || ''}
-                        onChange={(e) => {
-                          setUnitPrice(parseFloat(e.target.value) || 0);
-                          clearFormError('unitPrice');
-                        }}
+                        value={unitPriceInput}
+                        onChange={(e) => handleUnitPriceChange(e.target.value)}
                         aria-invalid={Boolean(formErrors.unitPrice) || undefined}
                         className={contactSheetInputClass(Boolean(formErrors.unitPrice))}
                       />
@@ -1664,6 +1788,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                         data-field-state="derived"
                       />
                     </FormField>
+
                     <label className="flex min-h-[66px] cursor-pointer items-center gap-3 rounded-[10px] border border-border bg-surface px-3.5 py-3 text-sm text-body">
                       <input
                         type="checkbox"
@@ -1706,7 +1831,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                 </ContactSheetFormSection>}
                 {businessType === '原料药' && (
                   <div className="rounded-xl border border-brand-cyan/25 bg-brand-cyan/10 px-4 py-3 text-xs leading-6 text-body">
-                    原料药将直接进入“合同 → 发货 → 收款 → 开票 → 完成”流程，不查询 QA 邮箱或排产系统，也不要求先建批次、入库或放行。
+                    原料药将直接进入“合同 → 发货 → 收款 → 开票 → 完成”流程，不要求先建批次、入库或放行。
                   </div>
                 )}
               </div>
@@ -1877,8 +2002,9 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                 <div className="md:col-span-5 space-y-4 bg-white/[0.01] border border-white/[0.03] p-4 rounded-xl text-xs flex flex-col justify-between">
                   <div>
                     <h4 className="font-bold text-slate-300 border-b border-white/[0.04] pb-1.5 mb-2.5">📋 联系单规格档案</h4>
-                    <table className="w-full text-left space-y-2 text-slate-400">
-                      <tbody>
+                    <table className="w-full table-fixed text-left space-y-2 text-slate-400">
+                      <colgroup><col className="w-20" /><col /></colgroup>
+                      <tbody className="[&_td:first-child]:whitespace-nowrap [&_td:first-child]:pr-4 [&_td]:align-top">
                         <tr className="border-b border-white/[0.02]">
                           <td className="py-2 font-medium">产品名称</td>
                           <td className="py-2 text-slate-100 font-bold">{s.product_name}</td>
@@ -2097,7 +2223,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                     production_date: '生产日期',
                     expiry_date: '失效日期',
                     qa_approval_date: 'QA 日期',
-                    aps_scheduled_date: '日期',
+                    aps_scheduled_date: '排产日期',
                     actual_warehousing_date: '入库日期',
                     actual_release_date: '放行日期'
                   };

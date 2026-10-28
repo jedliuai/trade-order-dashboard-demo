@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { initDataStore, db } from './services/dataStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -39,6 +39,9 @@ function bootstrapApplication() {
 
 function App() {
   const [currentTab, setTab] = useState('dashboard');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const handleNavigate = useCallback((tab: string) => { setTab(tab); setMobileNavOpen(false); }, []);
+  const handleCloseMobileNav = useCallback(() => setMobileNavOpen(false), []);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('trade-dashboard-sidebar-collapsed') === '1');
@@ -97,31 +100,31 @@ function App() {
   const renderPage = () => {
     switch (currentTab) {
       case 'dashboard':
-        return <Dashboard onNavigate={setTab} onRefreshTrigger={refreshTrigger} />;
+        return <Dashboard onNavigate={handleNavigate} onRefreshTrigger={refreshTrigger} />;
       case 'contact_sheets':
-        return <ContactSheets onNavigate={setTab} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
+        return <ContactSheets onNavigate={handleNavigate} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'contracts':
-        return <Contracts onNavigate={setTab} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
+        return <Contracts onNavigate={handleNavigate} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'batches':
-        return <Batches onNavigate={setTab} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
+        return <Batches onNavigate={handleNavigate} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'shipments':
         return <Shipments onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'payments':
-        return <Payments onNavigate={setTab} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
+        return <Payments onNavigate={handleNavigate} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'payments_balance':
-        return <Payments initialView="balance" onNavigate={setTab} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
+        return <Payments initialView="balance" onNavigate={handleNavigate} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'invoices':
         return <Shipments onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'profit':
         return <Profit onRefreshTrigger={refreshTrigger} />;
       case 'analytics':
-        return <Analytics onNavigate={setTab} onRefreshTrigger={refreshTrigger} />;
+        return <Analytics onNavigate={handleNavigate} onRefreshTrigger={refreshTrigger} />;
       case 'analytics_customer_value':
-        return <CustomerOperatingAnalysis onNavigate={setTab} onRefreshTrigger={refreshTrigger} />;
+        return <CustomerOperatingAnalysis onNavigate={handleNavigate} onRefreshTrigger={refreshTrigger} />;
       case 'analytics_customer_product':
-        return <CustomerProductAnalysis onNavigate={setTab} onRefreshTrigger={refreshTrigger} />;
+        return <CustomerProductAnalysis onNavigate={handleNavigate} onRefreshTrigger={refreshTrigger} />;
       case 'analytics_product_operating':
-        return <ProductOperatingAnalysis onNavigate={setTab} onRefreshTrigger={refreshTrigger} />;
+        return <ProductOperatingAnalysis onNavigate={handleNavigate} onRefreshTrigger={refreshTrigger} />;
       case 'customers':
         return <Customers onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'product_master_data':
@@ -129,13 +132,13 @@ function App() {
       case 'packaging_master_data':
         return <PackagingMasterData />;
       case 'alerts':
-        return <Alerts onNavigate={setTab} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
+        return <Alerts onNavigate={handleNavigate} onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       case 'exports':
         return <Exports onRefreshTrigger={refreshTrigger} />;
       case 'settings':
         return <Settings onRefreshData={handleRefreshData} onRefreshTrigger={refreshTrigger} />;
       default:
-        return <Dashboard onNavigate={setTab} onRefreshTrigger={refreshTrigger} />;
+        return <Dashboard onNavigate={handleNavigate} onRefreshTrigger={refreshTrigger} />;
     }
   };
 
@@ -193,26 +196,29 @@ function App() {
               ? 'analytics'
               : currentTab
         }
-        setTab={setTab}
+        setTab={handleNavigate}
         alertCount={stats.alertCount}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={handleCloseMobileNav}
       />
 
       {/* Main panel layout container */}
-      <div className={`min-w-0 flex-1 flex flex-col min-h-screen transition-[padding] duration-300 ${sidebarCollapsed ? 'pl-20' : 'pl-64'}`}>
+      <div className={`min-w-0 flex-1 flex flex-col min-h-screen transition-[padding] duration-300 ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         {/* Top Header info and sync buttons */}
         <Header
           title={getHeaderTitle()}
           currentRate={stats.currentRate}
           currentRateMonth={stats.currentRateMonth}
           onRefreshData={handleRefreshData}
-          onNavigate={setTab}
+          onNavigate={handleNavigate}
           sidebarCollapsed={sidebarCollapsed}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
         />
 
         {/* Dynamic page contents wrapper */}
-        <main className="mt-14 min-w-0 flex-1 overflow-y-auto p-6 2xl:p-8">
+        <main className="mt-14 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 2xl:p-8">
           {accountIdentity?.isReadOnly && (
             <div role="status" className="mb-5 rounded-lg border border-brand-cyan/25 bg-brand-cyan/10 px-4 py-3 text-xs text-brand-cyan">
               {IS_PUBLIC_DEMO

@@ -59,13 +59,20 @@ export function getContractOutstandingAmount(
   contactSheets: ContractAmountLineLike[],
   payments: ContractPaymentLike[]
 ): number {
-  const contractAmount = contactSheets
-    .filter((sheet) => sheet.contract_id === contractId)
-    .reduce((sum, sheet) => sum + Number(sheet.quantity || 0) * Number(sheet.unit_price || 0), 0);
+  const contractAmount = getContractAmount(contractId, contactSheets);
   const paidAmount = payments
     .filter((payment) => payment.contract_id === contractId)
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   return Math.max(0, normalizeMoneyAmount(contractAmount - paidAmount));
+}
+
+export function getContractAmount(
+  contractId: string,
+  contactSheets: ContractAmountLineLike[]
+): number {
+  return normalizeMoneyAmount(contactSheets
+    .filter((sheet) => sheet.contract_id === contractId)
+    .reduce((sum, sheet) => sum + Number(sheet.quantity || 0) * Number(sheet.unit_price || 0), 0));
 }
 
 export function getReceivableContracts<T extends ReceivableContractLike>(
@@ -80,6 +87,7 @@ export function getReceivableContracts<T extends ReceivableContractLike>(
     if (contract.customer_id !== customerId) return false;
     if (preserved.has(contract.id)) return true;
     if (contract.archived) return false;
+    if (getContractAmount(contract.id, contactSheets) <= 0.005) return true;
     return getContractOutstandingAmount(contract.id, contactSheets, payments) > 0.005;
   });
 }

@@ -43,9 +43,179 @@ export interface ShipmentDraftAllocationLike {
   shippedQty: number;
 }
 
+export interface ShipmentVolumeContactSheetLike {
+  id: string;
+  contact_sheet_no?: string | null;
+  unit?: string | null;
+  pcs_per_carton?: number | null;
+  packaging_profile_version_id?: string | null;
+}
+
+export interface ShipmentVolumePackagingVersionLike {
+  id: string;
+  quantity_per_carton?: number | null;
+  quantity_unit?: string | null;
+  carton_volume_m3?: number | null;
+}
+
+export interface ShipmentDraftVolumeSummary {
+  totalCartons: number;
+  totalVolumeM3: number;
+  calculatedItemCount: number;
+  missingItemCount: number;
+  missingContactSheetNos: string[];
+}
+
+export interface ShipmentDraftVolumeLine {
+  cartons: number;
+  volumeM3: number;
+  isCalculated: boolean;
+  contactSheetNo: string;
+}
+
+export type ShipmentPlanDetailMode = 'batch' | 'contact-sheet';
+
+export interface ShipmentPlanDisplayItemLike {
+  id: string;
+  shipment_id: string;
+  contact_sheet_id: string;
+  contract_no?: string | null;
+  contact_sheet_no?: string | null;
+  batch_no?: string | null;
+  material_no?: string | null;
+  product_name?: string | null;
+  specification?: string | null;
+  unit?: string | null;
+  shipped_quantity: number;
+  amount: number;
+  volume: ShipmentDraftVolumeLine;
+}
+
+export interface ShipmentPlanDisplayRow {
+  rowKey: string;
+  sourceItemIds: string[];
+  contract_no: string;
+  contact_sheet_id: string;
+  contact_sheet_no: string;
+  batch_no: string;
+  material_no: string;
+  product_name: string;
+  specification: string;
+  unit: string;
+  shipped_quantity: number;
+  amount: number;
+  batchCount: number;
+  volume: ShipmentDraftVolumeLine;
+}
+
 const normalizeDraftQuantity = (value: number) => (
   Number.isFinite(value) ? Math.max(0, Math.round((value + Number.EPSILON) * 1000) / 1000) : 0
 );
+
+const naturalTextCompare = (leftValue: string | null | undefined, rightValue: string | null | undefined) => {
+  const left = String(leftValue || '').trim();
+  const right = String(rightValue || '').trim();
+  if (!left || !right) {
+    if (!left && !right) return 0;
+    return left ? -1 : 1;
+  }
+  return left.localeCompare(right, 'zh-CN', { numeric: true, sensitivity: 'base' });
+};
+
+const shipmentPlanRowCompare = (
+  left: Pick<ShipmentPlanDisplayRow, 'contract_no' | 'contact_sheet_no' | 'batch_no'>,
+  right: Pick<ShipmentPlanDisplayRow, 'contract_no' | 'contact_sheet_no' | 'batch_no'>
+) => naturalTextCompare(left.contract_no, right.contract_no)
+  || naturalTextCompare(left.contact_sheet_no, right.contact_sheet_no)
+  || naturalTextCompare(left.batch_no, right.batch_no);
+
+export function summarizeShipmentBatchNumbers(values: Array<string | null | undefined>): string {
+  const unique = Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)))
+    .sort(naturalTextCompare);
+  if (unique.length < 2) return unique[0] || '';
+
+  const parsed = unique.map((value) => value.match(/^(.*?)(\d+)$/));
+  if (parsed.every((matched): matched is RegExpMatchArray => Boolean(matched))) {
+    const firstPrefix = parsed[0][1];
+    const firstNumber = parsed[0][2];
+    const numberWidth = firstNumber.length;
+    const numbers = parsed.map((matched) => Number(matched[2]));
+    const sameSequence = parsed.every((matched) => matched[1] === firstPrefix && matched[2].length === numberWidth)
+      && numbers.every((number, index) => index === 0 || number === numbers[index - 1] + 1);
+    if (sameSequence) {
+      const endNumber = parsed.at(-1)![2];
+      let commonPrefixLength = 0;
+      while (
+        commonPrefixLength < firstNumber.length
+        && firstNumber[commonPrefixLength] === endNumber[commonPrefixLength]
+      ) commonPrefixLength += 1;
+      const suffixWidth = Math.min(numberWidth, Math.max(2, numberWidth - commonPrefixLength));
+      return `${unique[0]}-${endNumber.slice(-suffixWidth)}`;
+    }
+  }
+
+  return unique.join('/');
+}
+
+const joinedUnique = (values: Array<string | null | undefined>) => Array.from(new Set(
+  values.map((value) => String(value || '').trim()).filter(Boolean)
+)).join('、');
+
+export function buildShipmentPlanDisplayRows(
+  items: readonly ShipmentPlanDisplayItemLike[],
+  mode: ShipmentPlanDetailMode
+): ShipmentPlanDisplayRow[] {
+  const batchRows = items.map((item): ShipmentPlanDisplayRow => ({
+    rowKey: item.id,
+    sourceItemIds: [item.id],
+    contract_no: String(item.contract_no || '').trim(),
+    contact_sheet_id: item.contact_sheet_id,
+    contact_sheet_no: String(item.contact_sheet_no || '').trim(),
+    batch_no: String(item.batch_no || '').trim(),
+    material_no: String(item.material_no || '').trim(),
+    product_name: String(item.product_name || '').trim(),
+    specification: String(item.specification || '').trim(),
+    unit: String(item.unit || '').trim(),
+    shipped_quantity: Number(item.shipped_quantity || 0),
+    amount: Number(item.amount || 0),
+    batchCount: 1,
+    volume: item.volume
+  })).sort(shipmentPlanRowCompare);
+
+  if (mode === 'batch') return batchRows;
+
+  const groups = new Map<string, ShipmentPlanDisplayRow[]>();
+  batchRows.forEach((row) => {
+    const key = `${row.contract_no}\u0000${row.contact_sheet_id}`;
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  });
+
+  return Array.from(groups.values()).map((group): ShipmentPlanDisplayRow => {
+    const first = group[0];
+    const calculatedVolumeRows = group.filter((row) => row.volume.isCalculated);
+    return {
+      ...first,
+      rowKey: `${first.contract_no}:${first.contact_sheet_id}`,
+      sourceItemIds: group.flatMap((row) => row.sourceItemIds),
+      batch_no: summarizeShipmentBatchNumbers(group.map((row) => row.batch_no)),
+      material_no: joinedUnique(group.map((row) => row.material_no)),
+      product_name: joinedUnique(group.map((row) => row.product_name)),
+      specification: joinedUnique(group.map((row) => row.specification)),
+      unit: joinedUnique(group.map((row) => row.unit)),
+      shipped_quantity: normalizeDraftQuantity(group.reduce((sum, row) => sum + row.shipped_quantity, 0)),
+      amount: group.reduce((sum, row) => sum + row.amount, 0),
+      batchCount: group.length,
+      volume: {
+        cartons: calculatedVolumeRows.reduce((sum, row) => sum + row.volume.cartons, 0),
+        volumeM3: Math.round((calculatedVolumeRows.reduce((sum, row) => sum + row.volume.volumeM3, 0) + Number.EPSILON) * 1e6) / 1e6,
+        isCalculated: calculatedVolumeRows.length === group.length,
+        contactSheetNo: first.contact_sheet_no || '未填写联系单号'
+      }
+    };
+  }).sort(shipmentPlanRowCompare);
+}
 
 export type ShipmentWorklistInvoiceState = 'not-shipped' | 'pending' | 'invoiced' | 'inconsistent';
 
@@ -109,6 +279,82 @@ export function summarizeShipmentDraft(allocations: ShipmentDraftAllocationLike[
       (sum, allocation) => sum + Math.max(0, allocation.availableQty - allocation.shippedQty),
       0
     ))
+  };
+}
+
+function normalizeCartonUnit(value: string | null | undefined) {
+  return String(value || '').trim().toLocaleLowerCase().replace(/\/箱$/, '');
+}
+
+export function calculateShipmentDraftVolumeLines(
+  allocations: readonly ShipmentDraftAllocationLike[],
+  contactSheets: readonly ShipmentVolumeContactSheetLike[],
+  packagingVersions: readonly ShipmentVolumePackagingVersionLike[]
+): ShipmentDraftVolumeLine[] {
+  const sheetById = new Map(contactSheets.map((sheet) => [sheet.id, sheet]));
+  const versionById = new Map(packagingVersions.map((version) => [version.id, version]));
+
+  return allocations.map((allocation) => {
+    const sheet = sheetById.get(allocation.contact_sheet_id);
+    const version = sheet?.packaging_profile_version_id
+      ? versionById.get(sheet.packaging_profile_version_id)
+      : undefined;
+    const quantityPerCarton = Number(sheet?.pcs_per_carton || version?.quantity_per_carton || 0);
+    const cartonVolumeM3 = Number(version?.carton_volume_m3 || 0);
+    const shipmentUnit = normalizeCartonUnit(sheet?.unit);
+    const packagingUnit = normalizeCartonUnit(version?.quantity_unit);
+    const unitsMatch = !shipmentUnit || !packagingUnit || shipmentUnit === packagingUnit;
+    const contactSheetNo = sheet?.contact_sheet_no || '未填写联系单号';
+
+    if (!sheet || !version || allocation.shippedQty <= 0 || quantityPerCarton <= 0 || cartonVolumeM3 <= 0 || !unitsMatch) {
+      return { cartons: 0, volumeM3: 0, isCalculated: false, contactSheetNo };
+    }
+
+    const cartons = Math.max(1, Math.ceil((allocation.shippedQty / quantityPerCarton) - 1e-10));
+    return {
+      cartons,
+      volumeM3: Math.round(((cartons * cartonVolumeM3) + Number.EPSILON) * 1e6) / 1e6,
+      isCalculated: true,
+      contactSheetNo
+    };
+  });
+}
+
+/**
+ * Container planning uses a conservative physical-volume estimate: each batch is rounded up
+ * to a whole outer carton, so remainders from different batches are never silently co-packed.
+ */
+export function summarizeShipmentDraftVolume(
+  allocations: readonly ShipmentDraftAllocationLike[],
+  contactSheets: readonly ShipmentVolumeContactSheetLike[],
+  packagingVersions: readonly ShipmentVolumePackagingVersionLike[]
+): ShipmentDraftVolumeSummary {
+  const selectedAllocations = allocations.filter((allocation) => allocation.shippedQty > 0);
+  const lines = calculateShipmentDraftVolumeLines(selectedAllocations, contactSheets, packagingVersions);
+  const missingContactSheetNos = new Set<string>();
+  let totalCartons = 0;
+  let totalVolumeM3 = 0;
+  let calculatedItemCount = 0;
+  let missingItemCount = 0;
+
+  lines.forEach((line) => {
+    if (!line.isCalculated) {
+      missingItemCount += 1;
+      missingContactSheetNos.add(line.contactSheetNo);
+      return;
+    }
+
+    totalCartons += line.cartons;
+    totalVolumeM3 += line.volumeM3;
+    calculatedItemCount += 1;
+  });
+
+  return {
+    totalCartons,
+    totalVolumeM3: Math.round((totalVolumeM3 + Number.EPSILON) * 1e6) / 1e6,
+    calculatedItemCount,
+    missingItemCount,
+    missingContactSheetNos: Array.from(missingContactSheetNos)
   };
 }
 

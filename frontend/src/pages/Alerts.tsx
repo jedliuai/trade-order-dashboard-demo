@@ -28,6 +28,12 @@ const relatedTypeLabels: Record<string, string> = {
   payment: '收款'
 };
 
+const summarizeAlertValues = (values: Array<string | null | undefined>) => {
+  const uniqueValues = Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+  if (uniqueValues.length <= 2) return uniqueValues.join('、');
+  return `${uniqueValues.slice(0, 2).join('、')} 等 ${uniqueValues.length} 项`;
+};
+
 export const Alerts: React.FC<AlertsProps> = ({ onNavigate, onRefreshData, onRefreshTrigger }) => {
   const { confirm, notify } = useFeedback();
   const [activeTab, setActiveTab] = useState<keyof typeof statusByTab>('pending');
@@ -58,33 +64,69 @@ export const Alerts: React.FC<AlertsProps> = ({ onNavigate, onRefreshData, onRef
 
   const alertTargets = useMemo(() => new Map(alerts.map((alert) => {
     let label = `${relatedTypeLabels[alert.related_type] || '业务记录'} ${alert.related_id.slice(0, 8)}`;
-    let detail = '';
+    let contractNo = '';
+    let customerName = '';
+    let productName = '';
     if (alert.related_type === 'contract') {
       const contract = contracts.find((row) => row.id === alert.related_id);
-      if (contract) { label = `合同 ${contract.contract_no}`; detail = contract.customer_name; }
+      if (contract) {
+        label = `合同 ${contract.contract_no}`;
+        contractNo = contract.contract_no;
+        customerName = contract.customer_name;
+        productName = summarizeAlertValues(contactSheets.filter((row) => row.contract_id === contract.id).map((row) => row.product_name));
+      }
     } else if (alert.related_type === 'contact_sheet') {
       const sheet = contactSheets.find((row) => row.id === alert.related_id);
       const contract = contracts.find((row) => row.id === sheet?.contract_id);
-      if (sheet) { label = `联系单 ${sheet.contact_sheet_no || '待编号'}`; detail = `${contract?.contract_no || '未关联合同'} · ${sheet.product_name}`; }
+      if (sheet) {
+        label = `联系单 ${sheet.contact_sheet_no || '待编号'}`;
+        contractNo = contract?.contract_no || sheet.contract_no;
+        customerName = contract?.customer_name || sheet.customer_name;
+        productName = sheet.product_name;
+      }
     } else if (alert.related_type === 'batch') {
       const batch = batches.find((row) => row.id === alert.related_id);
       const sheet = contactSheets.find((row) => row.id === batch?.contact_sheet_id);
-      if (batch) { label = `批号 ${batch.batch_no || '待填写'}`; detail = `${sheet?.contact_sheet_no || '未关联联系单'} · ${sheet?.product_name || ''}`; }
+      const contract = contracts.find((row) => row.id === sheet?.contract_id);
+      if (batch) {
+        label = `批号 ${batch.batch_no || '待填写'}`;
+        contractNo = sheet?.contract_no || batch.contract_no;
+        customerName = sheet?.customer_name || contract?.customer_name || '';
+        productName = sheet?.product_name || batch.product_name;
+      }
     } else if (alert.related_type === 'shipment') {
       const shipment = shipments.find((row) => row.id === alert.related_id);
-      if (shipment) { label = `发货 ${shipment.group_shipment_no || shipment.shipment_no}`; detail = `${shipment.contract_no} · ${shipment.customer_name}`; }
+      if (shipment) {
+        label = `发货 ${shipment.group_shipment_no || shipment.shipment_no}`;
+        contractNo = shipment.contract_no;
+        customerName = shipment.customer_name;
+        productName = summarizeAlertValues(db.getShipmentDetails(shipment.id).map((row) => row.product_name));
+      }
     } else if (alert.related_type === 'invoice') {
       const invoice = invoices.find((row) => row.id === alert.related_id);
-      if (invoice) { label = `发票 ${invoice.invoice_no || '未编号'}`; detail = `${invoice.shipment_no} · ${invoice.customer_name || ''}`; }
+      if (invoice) {
+        const shipmentIds = invoice.shipment_ids?.length ? invoice.shipment_ids : [invoice.shipment_id];
+        label = `发票 ${invoice.invoice_no || '未编号'}`;
+        contractNo = invoice.contract_no;
+        customerName = invoice.customer_name || '';
+        productName = summarizeAlertValues(shipmentIds.flatMap((shipmentId) => db.getShipmentDetails(shipmentId).map((row) => row.product_name)));
+      }
     } else if (alert.related_type === 'payment') {
       const payment = payments.find((row) => row.id === alert.related_id);
-      if (payment) { label = `收款 ${payment.payment_date}`; detail = `${payment.contract_no} · ${payment.customer_name}`; }
+      if (payment) {
+        label = `收款 ${payment.payment_date}`;
+        contractNo = payment.contract_no;
+        customerName = payment.customer_name;
+        productName = summarizeAlertValues(contactSheets.filter((row) => row.contract_id === payment.contract_id).map((row) => row.product_name));
+      }
     }
     return [alert.id, {
       label,
-      detail,
+      contractNo,
+      customerName,
+      productName,
       tab: getAlertNavigationTab(alert.related_type),
-      searchText: `${label} ${detail}`
+      searchText: `${label} ${contractNo} ${customerName} ${productName}`
     }];
   })), [alerts, contracts, contactSheets, batches, shipments, invoices, payments]);
 
@@ -312,8 +354,14 @@ export const Alerts: React.FC<AlertsProps> = ({ onNavigate, onRefreshData, onRef
                         <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge tone={priorityTone}>{alert.priority === 'high' ? '高风险' : alert.priority === 'medium' ? '中风险' : '日常'}</StatusBadge>
                           <span className="rounded-md border border-border bg-surface-muted px-2 py-1 text-[10px] font-semibold text-body">{target?.label}</span>
-                          {target?.detail && <span className="text-[10px] text-muted">{target.detail}</span>}
                         </div>
+                        {(target?.contractNo || target?.customerName || target?.productName) && (
+                          <dl className="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5">
+                            {target.contractNo && <div className="flex min-w-0 items-baseline gap-1.5"><dt className="text-[10px] text-muted">合同</dt><dd className="max-w-48 truncate text-[11px] font-bold text-ink" title={target.contractNo}>{target.contractNo}</dd></div>}
+                            {target.customerName && <div className="flex min-w-0 items-baseline gap-1.5"><dt className="text-[10px] text-muted">客户</dt><dd className="max-w-72 truncate text-[11px] font-bold text-ink" title={target.customerName}>{target.customerName}</dd></div>}
+                            {target.productName && <div className="flex min-w-0 items-baseline gap-1.5"><dt className="text-[10px] text-muted">产品</dt><dd className="max-w-80 truncate text-[11px] font-bold text-ink" title={target.productName}>{target.productName}</dd></div>}
+                          </dl>
+                        )}
                         <p className="mt-2 text-xs leading-6 text-body">{alert.message}</p>
                         {alert.status === '稍后提醒' && alert.snoozed_until && (
                           <div className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold ${alert.snoozed_until.slice(0, 10) <= formatLocalDate() ? 'bg-brand-rose/10 text-brand-rose' : 'bg-brand-amber/10 text-brand-amber'}`}>

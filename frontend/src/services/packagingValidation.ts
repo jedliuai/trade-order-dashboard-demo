@@ -34,8 +34,8 @@ export function validatePackagingOuterDimensions(draft: PackagingDimensions): Pa
 }
 
 export function packagingConstraintField(message: string): PackagingOuterDimensionField | null {
-  if (message.includes('outer_length_mm_gte_inner_check')) return 'carton_outer_length_mm';
-  if (message.includes('outer_width_mm_gte_inner_check')) return 'carton_outer_width_mm';
-  if (message.includes('outer_height_mm_gte_inner_check')) return 'carton_outer_height_mm';
+  if (message.includes('outer_length_mm_gte_inner_check') || message.includes('外箱外径长不能小于外箱内径长')) return 'carton_outer_length_mm';
+  if (message.includes('outer_width_mm_gte_inner_check') || message.includes('外箱外径宽不能小于外箱内径宽')) return 'carton_outer_width_mm';
+  if (message.includes('outer_height_mm_gte_inner_check') || message.includes('外箱外径高不能小于外箱内径高')) return 'carton_outer_height_mm';
   return null;
 }

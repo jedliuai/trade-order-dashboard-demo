@@ -156,7 +156,6 @@ export interface PaymentCheckResult {
 export function checkPaymentTermsBeforeShipment(
   paymentTerms: string,
   contractAmount: number,
-  _prepaymentAmount: number,
   totalPaid: number,
   _shipmentAmount: number
 ): PaymentCheckResult {

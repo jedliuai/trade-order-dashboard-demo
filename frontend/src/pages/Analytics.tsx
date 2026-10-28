@@ -81,7 +81,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ onNavigate, onRefreshTrigg
   const { notify } = useFeedback();
   const fiscalRange = useMemo(() => getFiscalYearRange(), []);
   // 1. The page consumes a service snapshot so the data source can later move
-  // from the synchronized cache to SQLite aggregation/pagination without a UI rewrite.
+  // from the synchronized cache to 本地数据库 aggregation/pagination without a UI rewrite.
   const analyticsData = useMemo(() => {
     void onRefreshTrigger;
     return loadAnalyticsDataSnapshot();
@@ -134,7 +134,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ onNavigate, onRefreshTrigg
   const builtInTemplateNames = useMemo(() => new Set(BUILT_IN_ANALYSIS_PRESETS.map((template) => template.name)), []);
   const customTemplates = useMemo(() => availableTemplates.filter((template) => !builtInTemplateNames.has(template.name)), [availableTemplates, builtInTemplateNames]);
 
-  // Load saved templates from local SQLite-backed cache
+  // Load saved templates from 本地数据库-backed cache
   useEffect(() => {
     const saved = loadAnalyticsTemplates();
     if (saved.length) {
@@ -613,7 +613,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ onNavigate, onRefreshTrigg
       }
     });
 
-    // Aggregate actual shipment profits from SQLite calculation view.
+    // Aggregate actual shipment profits from 本地数据库 calculation view.
     filteredProfitRows.forEach(row => {
       if (row.profit === null || row.is_estimated_profit) return;
       const sh = shipments.find(item => item.id === row.shipment_id);

@@ -261,6 +261,9 @@ class Transaction:
                             raise ApiError(f'记录仍被 {child} 引用，不能删除', 409, 'referenced')
                         if policy == 'null':
                             row[field] = None
+        if any((table, row['id']) in targets and row.get('status') in ('已发货', '取消')
+               for table in ('shipments', 'shipment_groups') for row in self.rows[table]):
+            raise ApiError('已确认或已作废的发货事实不能删除，请使用作废并复制')
         for child in TABLES:
             self.rows[child] = [r for r in self.rows[child] if (child, r['id']) not in targets]
 
@@ -295,6 +298,11 @@ class Store:
                 normalize_validate(rows)
                 self.persist(conn, rows)
                 conn.execute("INSERT INTO metadata VALUES ('initialized','1')")
+                from .migrations import SCHEMA_VERSION
+                conn.execute("INSERT INTO metadata VALUES ('schema_version',?)", (str(SCHEMA_VERSION),))
+            else:
+                from .migrations import migrate
+                migrate(self, conn)
 
     @contextmanager
     def connection(self):
@@ -319,6 +327,8 @@ class Store:
         if not isinstance(source, dict) or any(table not in TABLES for table in source):
             raise ApiError('种子包含未知表')
         result = {table: copy.deepcopy(source.get(table, [])) for table in TABLES}
+        from .migrations import backfill
+        backfill(result)
         return result
 
     @staticmethod
@@ -425,6 +435,8 @@ class Store:
             raise ApiError('未知或不可写数据表', 404, 'unknown_table')
         if table in READ_ONLY:
             raise ApiError('该表只读', 403, 'read_only_table')
+        if table in {'shipments', 'shipment_groups', 'shipment_items'}:
+            raise ApiError('发货事实只能通过整单业务动作维护', 403, 'action_required')
 
     def insert(self, table, data, params=None, user=SALES[0]):
         self.writable(table, user)
@@ -582,6 +594,11 @@ def normalize_validate(rows, before=None):
             raise ApiError('客户币种无效')
     for contract in rows['contracts']:
         customer = indexed['customers'][contract['customer_id']]
+        if contract.get('prepayment_ratio') is None:
+            contract['prepayment_ratio'] = .3
+        ratio = number(contract['prepayment_ratio'], '预付款比例')
+        if not 0 <= ratio <= 1:
+            raise ApiError('预付款比例必须在 0 到 1 之间')
         contract.setdefault('currency', customer['default_currency'])
         if contract['currency'] != customer['default_currency']:
             raise ApiError('同一客户必须使用默认币种')
@@ -595,6 +612,7 @@ def normalize_validate(rows, before=None):
             raise ApiError('出口类型与客户币种不匹配')
     old_sheets = {r['id']: r for r in before['contact_sheets']} if before is not None else {}
     for sheet in rows['contact_sheets']:
+        sheet['aps_auto_query_enabled'] = False
         positive(sheet, 'quantity')
         positive(sheet, 'unit_price')
         for field in ('pcs_per_carton', 'gross_weight_kg'):
@@ -695,9 +713,13 @@ def normalize_validate(rows, before=None):
         if receipt['currency'] != customer['default_currency']:
             raise ApiError('收款币种与客户默认币种不符')
     allocations, payments_by_contract = defaultdict(list), defaultdict(list)
+    old_payments = {p['id']: p for p in before['payments']} if before is not None else {}
     for payment in rows['payments']:
         positive(payment, 'amount')
         contract = indexed['contracts'][payment['contract_id']]
+        payment['allocation_effective_date'] = payment.get('allocation_effective_date') or payment.get('payment_date')
+        if before is not None and payment.get('shipment_id') and payment.get('shipment_id') != old_payments.get(payment['id'], {}).get('shipment_id'):
+            raise ApiError('收款只允许分摊到合同，不再指定具体发货记录')
         payment['currency'] = contract['currency']
         if payment.get('shipment_id') and indexed['shipments'][payment['shipment_id']]['contract_id'] != payment['contract_id']:
             raise ApiError('收款关联发货不属于当前合同')
@@ -775,6 +797,7 @@ def normalize_validate(rows, before=None):
         profile.setdefault('is_active', True)
     unique('packaging_profile_versions', ('profile_id', 'version_no'))
     for version in rows['packaging_profile_versions']:
+        version.setdefault('workshop', indexed['packaging_profiles'][version['profile_id']].get('workshop') or '')
         positive(version, 'quantity_per_carton')
         if version.get('quantity_unit') not in ('支/箱', '盒/箱', '瓶/箱'):
             raise ApiError('装箱单位只能选择支/箱、盒/箱或瓶/箱')
@@ -818,6 +841,11 @@ def normalize_validate(rows, before=None):
         if sheets:
             contract['packaging_confirmed_date'] = max(s['packaging_confirmed_date'] for s in sheets) if all(s.get('packaging_confirmed_date') for s in sheets) else None
     if before:
+        old_profiles = {r['id']: r for r in before['packaging_profiles']}
+        for profile in rows['packaging_profiles']:
+            old = old_profiles.get(profile['id'])
+            if old and old.get('workshop') != profile.get('workshop') and any(v['profile_id'] == profile['id'] for v in before['packaging_profile_versions']):
+                raise ApiError('已有版本的包装模板不能修改生产车间，请创建独立包装模板')
         old_shipments = {r['id']: r for r in before['shipments']}
         for shipment in rows['shipments']:
             old = old_shipments.get(shipment['id'])

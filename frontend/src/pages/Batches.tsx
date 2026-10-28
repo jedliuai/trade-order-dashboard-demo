@@ -61,8 +61,8 @@ export const Batches: React.FC<BatchesProps> = ({ onNavigate, onRefreshData, onR
       const tracking = resolveBatchTracking({
         batchNo: batch.batch_no,
         productName: batch.product_name,
-        productionDate: batch.production_date,
-        expiryDate: batch.expiry_date,
+        productionDate: sheet?.production_date,
+        expiryDate: sheet?.expiry_date,
         warehouseDate: batch.warehouse_date,
         releaseDate: batch.release_date,
         apsScheduledDate: sheet?.aps_scheduled_date,

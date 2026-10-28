@@ -269,7 +269,7 @@ class ActionTest(unittest.TestCase):
         self.assertRollback(self.store.insert, 'mdc_product_variants', {'product_id': product['id'], 'specification': '１０.０ ML'})
 
     def test_packaging_versions_preserve_history_and_compute_view_fields(self):
-        pid = self.rpc('create_packaging_profile_with_version', profile_data={'product_name': '演示包装'},
+        pid = self.rpc('create_packaging_profile_with_version', profile_data={'product_name': '演示包装', 'workshop': '演示车间'},
             version_data={'quantity_per_carton': 10, 'quantity_unit': '盒/箱', 'units_per_box': 5,
                           'carton_outer_length_mm': 500, 'carton_outer_width_mm': 400, 'carton_outer_height_mm': 300})
         first = self.store.query('packaging_current_profiles')[0]
@@ -415,10 +415,11 @@ class ActionTest(unittest.TestCase):
         self.assertRollback(self.store.update, 'shipments', {'id': 'eq.' + sid}, {'incoterm_snapshot': 'CIF'})
 
     def test_freight_rpc_validates_fob_and_distributes_rounding_remainder(self):
-        sid = self.shipment()
+        gid = self.rpc('create_shipment_group_with_items', group_data={'customer_id': 'cu', 'shipment_no': 'FOB-PLAN', 'status': '准备中'}, item_rows=[self.item()])
+        sid = self.store.query('shipments')[0]['id']
         self.assertRollback(self.rpc, 'set_physical_shipment_freight', target_shipment_id=sid, requested_freight=1)
         self.assertIsNone(self.rpc('set_physical_shipment_freight', target_shipment_id=sid, requested_freight=0))
-        self.store.delete('shipments', {'id': 'eq.' + sid})
+        self.rpc('delete_preparing_shipment_group', target_group_id=gid)
         self.store.update('contracts', {'customer_id': 'eq.cu'}, {'incoterm': 'CIF'})
         self.rpc('create_shipment_group_with_items', group_data={'customer_id': 'cu', 'shipment_no': 'ROUND', 'status': '准备中'},
                  item_rows=[self.item(20), self.item(10, 'cs2', None)])
@@ -464,8 +465,8 @@ class ActionTest(unittest.TestCase):
 
     def test_legacy_group_optional_date_and_free_text_payment_check_survive(self):
         sid = self.shipment()
-        self.store.update('shipments', {'id': 'eq.' + sid}, {'payment_check_status': '已通过'})
         with self.store.transaction() as tx:
+            tx.get('shipments', sid)['payment_check_status'] = '已通过'
             tx.add('shipment_groups', {'id': 'legacy-group', 'customer_id': 'cu', 'currency': 'USD',
                    'incoterm': 'FOB', 'status': '已发货', 'shipment_no': 'LEGACY'})
             tx.get('shipments', sid)['shipment_group_id'] = 'legacy-group'

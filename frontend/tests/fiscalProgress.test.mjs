@@ -56,6 +56,15 @@ test('不足100%时也保留双圈引导轨迹以明确后续延伸方向', () =
   assert.ok(geometry.trackPath.split(' C ').length > geometry.lapSegments[0].path.split(' C ').length);
 });
 
+test('不同实际圈数使用共同容量时保持相同圈距', () => {
+  const oneLapGeometry = buildFiscalSpiralGeometry(calculateFiscalProgress(145, 100), 112, 10, 3);
+  const threeLapGeometry = buildFiscalSpiralGeometry(calculateFiscalProgress(229, 100), 112, 10, 3);
+  assert.equal(oneLapGeometry.capacityTurns, 3);
+  assert.equal(threeLapGeometry.capacityTurns, 3);
+  assert.deepEqual(oneLapGeometry.boundaryPoints[0], threeLapGeometry.boundaryPoints[0]);
+  assert.equal(oneLapGeometry.trackPath, threeLapGeometry.trackPath);
+});
+
 test('螺旋只使用无填充描边，不生成扇形三角', () => {
   const source = readFileSync(new URL('../src/components/FiscalProgressRing.tsx', import.meta.url), 'utf8');
   assert.equal(source.includes('<polygon'), false);

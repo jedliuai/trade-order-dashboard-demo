@@ -19,7 +19,9 @@ COMMANDS = {
     'export-production', 'export-monthly', 'export-original-contracts', 'export-helper',
     'export-payments', 'export-customer-monthly-sales', 'export-rmb-invoice',
     'export-shipment-plan', 'export-receipt-confirmation', 'export-shipment-details',
+    'export-release-application', 'export-usd-actual-invoice', 'export-expected-invoice',
 }
+LOCAL_ONLY_COMMANDS = {'export-release-application', 'export-usd-actual-invoice', 'export-expected-invoice'}
 
 
 def _text(value):
@@ -187,8 +189,8 @@ def _operational_rows(context, kind):
         customer = context['customers'].get(contract.get('customer_id'), {})
         batches = batches_by_sheet[sheet.get('id')]
         batch_text = _joined(batch.get('batch_no') for batch in batches)
-        production_date = sheet.get('production_date') or _joined(batch.get('production_date') for batch in batches)
-        expiry_date = sheet.get('expiry_date') or _joined(batch.get('expiry_date') for batch in batches)
+        production_date = sheet.get('production_date')
+        expiry_date = sheet.get('expiry_date')
         batch_note = _joined(
             f"{batch.get('batch_no')}：{float(batch.get('batch_quantity') or 0):g} {sheet.get('unit') or ''}".strip()
             for batch in batches
@@ -214,7 +216,7 @@ def _operational_rows(context, kind):
     return rows
 
 
-def _xlsx(title, subtitle, headers, rows):
+def _xlsx(title, subtitle, headers, rows, calculated_columns=None):
     book = Workbook()
     sheet = book.active
     sheet.title = re.sub(r'[:\\/*?\[\]]', '_', title)[:31] or '演示报表'
@@ -234,6 +236,10 @@ def _xlsx(title, subtitle, headers, rows):
         for column_index, header in enumerate(headers, 1):
             cell = sheet.cell(row_index, column_index, _text(row.get(header, '')))
             cell.alignment = Alignment(vertical='top', wrap_text=True)
+        # Only application-owned formula templates reach this path. User text
+        # continues through _text, which neutralizes spreadsheet formula input.
+        for header, formula in (calculated_columns or {}).items():
+            sheet.cell(row_index, headers.index(header) + 1, formula.format(row=row_index))
     sheet.freeze_panes = 'A5'
     sheet.auto_filter.ref = f'A4:{get_column_letter(max(1, len(headers)))}{max(4, len(rows) + 4)}'
     for index, header in enumerate(headers, 1):
@@ -271,7 +277,46 @@ def _payments(context):
     filters, start, end = context['filters'], *_date_range(context['filters'])
     records = []
     keyword = str(filters.get('keyword') or '').casefold()
+    receipts = {r['id']: r for r in context['rows']['payment_receipts']}
+    allocations = defaultdict(list)
     for payment in context['rows']['payments']:
+        if payment.get('receipt_id') in receipts:
+            allocations[payment['receipt_id']].append(payment)
+    for receipt in receipts.values():
+        customer = context['customers'].get(receipt['customer_id'], {})
+        if _ids(filters, 'customer_id') is not None and receipt['customer_id'] not in _ids(filters, 'customer_id'):
+            continue
+        if (start or end) and not _in_range(receipt.get('payment_date'), start, end):
+            continue
+        if filters.get('currency') and receipt['currency'] != filters['currency']:
+            continue
+        parts = allocations[receipt['id']]
+        matching = [p for p in parts if (c := context['contracts'].get(p['contract_id']))
+                    and _match_contract(c, context, apply_dates=False)
+                    and (not filters.get('export_type') or c['export_type'] == filters['export_type'])]
+        if (_ids(filters, 'contract_id') is not None or filters.get('export_type')
+                or _ids(filters, 'shipment_id') is not None or _ids(filters, 'shipment_group_id') is not None) and not matching:
+            continue
+        contracts = [context['contracts'][p['contract_id']] for p in parts]
+        searchable = ' '.join(str(value or '') for value in [customer.get('name'), receipt.get('receipt_no'), receipt.get('notes'),
+                              *[c.get('contract_no') for c in contracts], *[c.get('internal_contract_seq') for c in contracts]]).casefold()
+        if keyword and keyword not in searchable:
+            continue
+        allocated = sum(p['amount'] for p in parts)
+        child_filter = _ids(filters, 'contract_id') is not None or bool(filters.get('export_type'))
+        matched_amount = sum(p['amount'] for p in matching) if child_filter else receipt['total_amount']
+        matched_rmb = receipt.get('amount_rmb')
+        if child_filter:
+            matched_rmb = sum(p.get('amount_rmb') or (p['amount'] if p['currency'] == 'RMB' else 0) for p in matching) if all(p.get('amount_rmb') is not None or p['currency'] == 'RMB' for p in matching) else None
+        records.append({'记录类型': '整笔到账', '客户': customer.get('name'), '银行流水号': receipt.get('receipt_no'),
+                        '合同号': '、'.join(c['contract_no'] for c in contracts), '回款日期': receipt['payment_date'],
+                        '金额': matched_amount, '实际到账总额': receipt['total_amount'], '币种': receipt['currency'], '人民币金额': matched_rmb,
+                        '已分摊金额': allocated, '客户预存款': max(0, receipt['total_amount'] - allocated),
+                        '合同分摊明细': '；'.join(f"{context['contracts'][p['contract_id']]['contract_no']}: {p['amount']:g}" for p in parts),
+                        '备注': receipt.get('notes')})
+    for payment in context['rows']['payments']:
+        if payment.get('receipt_id') in receipts:
+            continue
         contract = context['contracts'].get(payment.get('contract_id'))
         if not contract or not _match_contract(contract, context, apply_dates=False):
             continue
@@ -291,7 +336,7 @@ def _payments(context):
         records.append({'记录类型': '合同分摊', '客户': customer.get('name'), '合同号': contract.get('contract_no'),
                         '回款日期': payment_date, '回款类型': payment.get('payment_type'), '金额': payment.get('amount'),
                         '币种': payment.get('currency'), '人民币金额': payment.get('amount_rmb')})
-    return records
+    return sorted(records, key=lambda r: str(r.get('回款日期') or ''), reverse=True)
 
 
 def _rate_lookup(context, currency, when, latest=False):
@@ -469,6 +514,17 @@ def export_file(store, command, filters, user='demo-sales-1'):
         title, rows = '生产协调与催包材统计表', _operational_rows(context, 'production')
         headers = ['联系单号', '合同号', '客户', '产品名称', '规格', '批号汇总', '生产/排产日期', '有效期', 'QA审批日期',
                    '实际入库日期', '包装/包材', '数量', '单位', '已发货数量', '交付说明']
+    elif command == 'export-release-application':
+        from .export_latest import release_rows
+        title, rows = '出口产品放行申请信息统计表', release_rows(context)
+        subtitle += ' 车间引用包装版本快照；制造周期等自动同步字段留空，需手工补充。'
+    elif command in ('export-usd-actual-invoice', 'export-expected-invoice'):
+        from .export_latest import invoice_rows
+        usd_only = command == 'export-usd-actual-invoice'
+        title = '美金实际开票' if usd_only else '预计开票'
+        rows = invoice_rows(context, usd_only)
+        if not usd_only:
+            subtitle += ' 财务成本待填写，预计利润不是已确认利润。'
     elif command == 'export-monthly':
         title, rows = '订单月度汇总表', _line_rows(context)
     elif command == 'export-original-contracts':
@@ -485,6 +541,7 @@ def export_file(store, command, filters, user='demo-sales-1'):
                    '参考联系单', '质量标准', '批次数量说明']
     elif command == 'export-payments':
         title, rows = '回款明细表', _payments(context)
+        headers = ['记录类型', '客户', '银行流水号', '合同号', '回款日期', '金额', '实际到账总额', '币种', '人民币金额', '已分摊金额', '客户预存款', '合同分摊明细', '回款类型', '备注']
     elif command == 'export-customer-monthly-sales':
         title, rows = '客户实际销售、回款及应收汇总', _customer_monthly(context)
         headers = ['客户', '币种', '本月订单原币', '本月回款原币', '累计已发货原币', '累计已回款原币', '当前应收原币',
@@ -495,8 +552,9 @@ def export_file(store, command, filters, user='demo-sales-1'):
         headers = ['合同号', '客户', '联系单号', '物料号', '产品名称', '规格', '数量', '单位', '单价', '金额', '发货单号',
                    '发货日期', '批号', '发票号', '发票状态', '分摊开票金额', '备注']
     elif command == 'export-shipment-plan':
-        title, rows = '发货安排表', _line_rows(context, shipments_only=True)
-        headers = ['客户', '合同号', '联系单号', '产品名称', '批号', '发货单号', '发货日期', '发货状态', '数量', '单位', '单价', '金额', '币种']
+        from .export_latest import shipment_plan_rows
+        title, rows = '发货安排表', shipment_plan_rows(context, _line_rows(context, shipments_only=True))
+        headers = ['客户', '合同号', '联系单号', '物料号', '产品名称', '规格', '批号', '发货单号', '发货日期', '发货状态', '数量', '单位', '单价', '金额', '币种', '箱数', '体积（m³）', '生产日期', '失效日期']
     elif command == 'export-receipt-confirmation':
         title, rows = '收货确认函（演示）', _line_rows(context, shipments_only=True)
         headers = ['客户', '合同号', '联系单号', '产品名称', '批号', '发货单号', '发货日期', '数量', '单位', '币种']
@@ -522,4 +580,5 @@ def export_file(store, command, filters, user='demo-sales-1'):
                    '金额', '币种', '汇率', '利润（人民币）', '利润状态']
     if 'headers' not in locals():
         headers = list(rows[0]) if rows else ['客户', '合同号', '联系单号', '产品名称']
-    return f'{title}-演示.xlsx', XLSX_MIME, _xlsx(title, subtitle, headers, rows)
+    calculated_columns = {'总利润（万元）': '=(H{row}-F{row})*G{row}'} if command == 'export-expected-invoice' else None
+    return f'{title}-演示.xlsx', XLSX_MIME, _xlsx(title, subtitle, headers, rows, calculated_columns)

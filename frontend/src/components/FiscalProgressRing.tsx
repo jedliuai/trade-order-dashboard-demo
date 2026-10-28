@@ -7,6 +7,7 @@ interface FiscalProgressRingProps {
   color: string;
   size?: number;
   strokeWidth?: number;
+  sharedCapacityTurns?: number;
 }
 
 const LAP_PALETTES: Record<string, Array<[string, string]>> = {
@@ -31,11 +32,12 @@ export const FiscalProgressRing: React.FC<FiscalProgressRingProps> = ({
   previous,
   color,
   size = 112,
-  strokeWidth = 10
+  strokeWidth = 10,
+  sharedCapacityTurns
 }) => {
   const idBase = `fiscal-spiral-${useId().replace(/:/g, '')}`;
   const progress = calculateFiscalProgress(current, previous);
-  const geometry = buildFiscalSpiralGeometry(progress, size, strokeWidth);
+  const geometry = buildFiscalSpiralGeometry(progress, size, strokeWidth, sharedCapacityTurns);
   const displayPercent = progress.percent === null ? '—' : `${progress.percent.toFixed(1)}%`;
   const lapDescription = progress.percent === null
     ? '上财年无可比基数'

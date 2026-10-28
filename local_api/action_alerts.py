@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from .store import number, iso_date
 from .action_common import update
+from .payment_progress import prepayment_date
 
 
 ALERT_TYPES = {
@@ -54,7 +55,7 @@ def refresh_alerts(tx):
         payments = payments_by_contract[contract['id']]
         total = sum((number(s['quantity']) * number(s['unit_price']) for s in sheets), Decimal(0))
         paid = sum((number(p['amount']) for p in payments), Decimal(0))
-        prep = min((p['payment_date'] for p in payments if p.get('payment_type') == '预付款' and p.get('payment_date')), default=None)
+        prep = prepayment_date(contract, total, payments)
         if (production or not sheets) and not contract.get('delivery_days') and not contract.get('agreed_delivery_date'):
             add('请填写合同交货期', 'contract', contract, f"{contract['contract_no']} 缺少合同交货期天数。")
         due = contract.get('agreed_delivery_date')

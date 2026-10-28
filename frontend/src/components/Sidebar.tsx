@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -15,6 +15,7 @@ import {
   Boxes,
   ChevronLeft,
   ChevronRight,
+  X,
   type LucideIcon
 } from 'lucide-react';
 import { ColorIconBadge, type ColorIconTone } from './ColorIconBadge';
@@ -25,6 +26,8 @@ interface SidebarProps {
   alertCount: number;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
 interface MenuItem {
@@ -40,7 +43,66 @@ interface MenuGroup {
   items: MenuItem[];
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, alertCount, collapsed, onToggleCollapsed }) => {
+const focusableSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',');
+
+export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, alertCount, collapsed, onToggleCollapsed, mobileOpen, onMobileClose }) => {
+  const sidebarRef = useRef<HTMLElement>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement>(null);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const handleChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches);
+    setIsDesktop(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (isDesktop) {
+      if (mobileOpen) onMobileClose();
+      return;
+    }
+    if (!mobileOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const frame = window.requestAnimationFrame(() => mobileCloseRef.current?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onMobileClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !sidebarRef.current || window.innerWidth >= 1024) return;
+      const focusable = Array.from(sidebarRef.current.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => element.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [isDesktop, mobileOpen, onMobileClose]);
+
   const menuGroups: MenuGroup[] = [
     {
       label: '总览',
@@ -88,9 +150,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, alertCount
   ];
 
   return (
-    <aside className={`${collapsed ? 'w-20' : 'w-64'} fixed left-0 top-0 z-20 flex h-screen flex-col border-r border-border bg-surface-muted/95 backdrop-blur-xl transition-[width] duration-300`}>
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="关闭主导航"
+          onClick={onMobileClose}
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] lg:hidden"
+        />
+      )}
+      <aside
+        ref={sidebarRef}
+        id="app-sidebar"
+        role={!isDesktop ? 'dialog' : undefined}
+        aria-modal={!isDesktop && mobileOpen ? true : undefined}
+        aria-label="主导航面板"
+        aria-hidden={!isDesktop && !mobileOpen ? true : undefined}
+        inert={!isDesktop && !mobileOpen ? true : undefined}
+        className={`fixed left-0 top-0 z-50 flex h-screen w-64 flex-col border-r border-border bg-surface-muted/95 backdrop-blur-xl transition-[width,transform] duration-300 lg:z-20 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} ${collapsed ? 'lg:w-20' : 'lg:w-64'}`}
+      >
       {/* Brand Header */}
-      <div className={`relative flex h-14 items-center border-b border-border ${collapsed ? 'justify-center px-3' : 'px-6'}`}>
+      <div className={`relative flex h-14 items-center border-b border-border px-6 ${collapsed ? 'lg:justify-center lg:px-3' : ''}`}>
         <div className="flex items-center gap-3 min-w-0">
           <img
             src="/brand/trade-tracker-app-icon.svg"
@@ -98,59 +178,67 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, alertCount
             aria-hidden="true"
             className="h-9 w-9 shrink-0 rounded-[10px] shadow-sm"
           />
-          {!collapsed && <div className="min-w-0">
+          <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
             <h1 className="font-heading text-sm font-semibold leading-tight text-ink">个人订单驾驶舱</h1>
             <span className="text-[10px] tracking-wider text-subtle">TRADE TRACKER V1.0</span>
-          </div>}
+          </div>
         </div>
         <button
           type="button"
           onClick={onToggleCollapsed}
           aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
           title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
-          className="absolute -right-3 top-4 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-sm transition-colors hover:border-brand-cyan/40 hover:text-brand-cyan"
+          className="absolute -right-3 top-4 z-30 hidden h-6 w-6 items-center justify-center rounded-full border border-border bg-surface text-subtle shadow-sm transition-colors hover:border-brand-cyan/40 hover:text-brand-cyan lg:flex"
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          ref={mobileCloseRef}
+          type="button"
+          onClick={onMobileClose}
+          aria-label="关闭主导航"
+          className="absolute right-4 top-3 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-muted transition-colors hover:text-ink lg:hidden"
+        >
+          <X className="h-4 w-4" />
         </button>
       </div>
 
       {/* Nav List */}
-      <nav aria-label="主导航" className={`flex-1 overflow-y-auto py-4 ${collapsed ? 'px-2' : 'px-4'}`}>
+      <nav aria-label="主导航" className={`flex-1 overflow-y-auto px-4 py-4 ${collapsed ? 'lg:px-2' : ''}`}>
         <div className="space-y-4">
           {menuGroups.map((group, groupIndex) => (
-            <div key={group.label} className={`${collapsed && groupIndex > 0 ? 'border-t border-border/70 pt-3' : ''} space-y-1`}>
-              {!collapsed && (
-                <div className="px-4 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-subtle">
+            <div key={group.label} className={`${collapsed && groupIndex > 0 ? 'lg:border-t lg:border-border/70 lg:pt-3' : ''} space-y-1`}>
+              <div className={`px-4 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-subtle ${collapsed ? 'lg:hidden' : ''}`}>
                   {group.label}
-                </div>
-              )}
+              </div>
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = currentTab === item.id;
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setTab(item.id)}
+                    onClick={() => {
+                      setTab(item.id);
+                      onMobileClose();
+                    }}
                     aria-current={isActive ? 'page' : undefined}
                     aria-label={item.name}
                     title={collapsed ? item.name : undefined}
-                    className={`relative w-full flex items-center rounded-lg py-2.5 text-sm transition-all duration-200 group text-left ${
-                      collapsed ? 'justify-center px-2' : 'justify-between px-4'
-                    } ${
+                    className={`group relative flex w-full items-center justify-between rounded-lg px-4 py-2.5 text-left text-sm transition-all duration-200 ${collapsed ? 'lg:justify-center lg:px-2' : ''} ${
                       isActive
                         ? 'bg-brand-cyan/15 border border-brand-cyan/25 text-brand-cyan font-bold shadow-sm'
                         : 'border border-transparent text-muted hover:bg-surface/70 hover:text-body'
                     }`}
                   >
-                    <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
+                    <div className={`flex items-center gap-3 ${collapsed ? 'lg:justify-center lg:gap-0' : ''}`}>
                       <ColorIconBadge tone={item.tone} size="xs" className="transition-transform duration-200 group-hover:scale-105">
                         <Icon className="h-3.5 w-3.5" />
                       </ColorIconBadge>
-                      {!collapsed && <span>{item.name}</span>}
+                      <span className={collapsed ? 'lg:hidden' : ''}>{item.name}</span>
                     </div>
 
                     {item.badge !== undefined && item.badge > 0 && (
-                      <span className={`${collapsed ? 'absolute -right-0.5 -top-1 min-w-5 px-1' : 'px-2'} py-0.5 text-[10px] font-bold rounded-full bg-brand-rose/25 text-brand-rose border border-brand-rose/20 animate-pulse-slow text-center`}>
+                      <span className={`min-w-5 rounded-full border border-brand-rose/20 bg-brand-rose/25 px-2 py-0.5 text-center text-[10px] font-bold text-brand-rose animate-pulse-slow ${collapsed ? 'lg:absolute lg:-right-0.5 lg:-top-1 lg:px-1' : ''}`}>
                         {item.badge}
                       </span>
                     )}
@@ -163,20 +251,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, alertCount
       </nav>
 
       {/* Brand Foot */}
-      <div className={`${collapsed ? 'px-3 py-4' : 'p-4'} border-t border-border bg-surface-muted/40`}>
-        <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`} title={collapsed ? '个人订单驾驶舱' : undefined}>
+      <div className={`border-t border-border bg-surface-muted/40 p-4 ${collapsed ? 'lg:px-3 lg:py-4' : ''}`}>
+        <div className={`flex items-center gap-3 ${collapsed ? 'lg:justify-center lg:gap-0' : ''}`} title={collapsed ? '个人订单驾驶舱' : undefined}>
           <img
             src="/brand/trade-tracker-mark.svg"
             alt=""
             aria-hidden="true"
             className="h-9 w-9 shrink-0"
           />
-          {!collapsed && <div className="min-w-0">
+          <div className={`min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
             <div className="text-xs font-semibold text-body">订单工作台</div>
             <div className="text-[10px] tracking-[0.14em] text-subtle">TRADE TRACKER</div>
-          </div>}
+          </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };

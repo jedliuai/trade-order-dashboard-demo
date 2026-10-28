@@ -7,7 +7,6 @@ export interface AccountingAllocation {
   payment_date: string;
   amount: number;
   currency: 'USD' | 'RMB';
-  payment_type: string;
   created_at?: string;
 }
 
@@ -17,7 +16,6 @@ export interface AccountingReceipt {
   payment_date: string;
   total_amount: number;
   currency: 'USD' | 'RMB';
-  payment_type: string;
 }
 
 export interface AccountingContractTotal {
@@ -66,20 +64,22 @@ export function buildPaymentAccountingMessage({
   });
 
   const currencyLabel = receipt.currency === 'USD' ? '美金' : '人民币';
+  const contractCurrencyLabel = receipt.currency === 'USD' ? '美元' : '人民币';
   const dateLabel = formatChineseDate(receipt.payment_date);
   const lines = Array.from(grouped.values()).map((allocation) => {
     const total = totalsByContract.get(allocation.contract_id) || 0;
     const receivedAsOfDate = allPayments
       .filter((payment) => payment.contract_id === allocation.contract_id && payment.payment_date <= receipt.payment_date)
       .reduce((sum, payment) => sum + payment.amount, 0);
-    const recoveryRate = total > 0 ? `${formatPercent((receivedAsOfDate / total) * 100)}%` : '无法计算';
-    return `${allocation.customer_name || receipt.customer_name}，合同号：${allocation.contract_no || '未填写'}，货款类型：${allocation.payment_type || receipt.payment_type}，本次入账金额：${formatAmount(allocation.amount)}${currencyLabel}，入账时间：${dateLabel}，截止此日期此合同回款率：${recoveryRate}`;
+    const recoveryRate = total > 0.005 ? `${formatPercent((receivedAsOfDate / total) * 100)}%` : '暂无法计算';
+    const contractTotal = total > 0.005 ? `${formatAmount(total)}${contractCurrencyLabel}` : '待录入';
+    return `${allocation.customer_name || receipt.customer_name}，合同号：${allocation.contract_no || '未填写'}，本次入账金额：${formatAmount(allocation.amount)}${currencyLabel}，合同总金额：${contractTotal}，入账时间：${dateLabel}，截止此日期此合同回款率：${recoveryRate}`;
   });
 
   const allocatedAmount = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
   const depositAmount = Math.max(0, receipt.total_amount - allocatedAmount);
   if (depositAmount > 0.005) {
-    lines.push(`${receipt.customer_name}，货款类型：客户预存款，本次入账金额：${formatAmount(depositAmount)}${currencyLabel}，入账时间：${dateLabel}，暂未关联合同`);
+    lines.push(`${receipt.customer_name}，客户预存款：${formatAmount(depositAmount)}${currencyLabel}，入账时间：${dateLabel}，暂未关联合同`);
   }
 
   return `张姐，收到，多谢。明细如下：\n${lines.join('\n')}`;

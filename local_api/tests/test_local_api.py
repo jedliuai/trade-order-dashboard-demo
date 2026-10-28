@@ -128,7 +128,7 @@ class LocalApiTest(unittest.TestCase):
         self.assertEqual(self.store.query('v_shipment_profit'), [])
 
     def test_atomic_shipment_update_and_cancel_releases_capacity(self):
-        sid = self.shipment()
+        sid = self.shipment(status='准备中')
         self.assertEqual(self.rpc('update_shipment_with_items', target_shipment_id=sid,
             shipment_data={'shipment_no': 'REVISED', 'status': '取消', 'shipment_date': '2026-08-04'},
             target_payment_status='需人工确认', item_rows=[{'contact_sheet_id': 'cs', 'batch_id': 'b', 'shipped_quantity': 40, 'unit_price': 12}]), 1)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { canExportReceiptConfirmation, matchesShipmentFilters, setAllShipmentAllocationQuantities, sortShipmentWorklist, summarizeShipmentDraft, summarizeShipmentSources } from '../src/services/shipmentWorkspace.ts';
+import { buildShipmentPlanDisplayRows, calculateShipmentDraftVolumeLines, canExportReceiptConfirmation, matchesShipmentFilters, setAllShipmentAllocationQuantities, sortShipmentWorklist, summarizeShipmentBatchNumbers, summarizeShipmentDraft, summarizeShipmentDraftVolume, summarizeShipmentSources } from '../src/services/shipmentWorkspace.ts';
 
 const shipmentsPageSource = readFileSync(
   new URL('../src/pages/Shipments.tsx', import.meta.url),
@@ -52,6 +52,122 @@ test('发货草稿固定汇总本次数量与发货后剩余量', () => {
   });
 });
 
+test('发货总体积按每个批号分别向上取整为整箱', () => {
+  const summary = summarizeShipmentDraftVolume([
+    { contract_no: 'PO-001', contact_sheet_id: 'sheet-1', batch_id: 'batch-1', availableQty: 200, shippedQty: 101 },
+    { contract_no: 'PO-001', contact_sheet_id: 'sheet-1', batch_id: 'batch-2', availableQty: 100, shippedQty: 1 }
+  ], [{
+    id: 'sheet-1',
+    contact_sheet_no: 'CS-001',
+    unit: '支',
+    pcs_per_carton: 100,
+    packaging_profile_version_id: 'version-1'
+  }], [{
+    id: 'version-1',
+    quantity_per_carton: 100,
+    quantity_unit: '支/箱',
+    carton_volume_m3: 0.05
+  }]);
+
+  assert.deepEqual(summary, {
+    totalCartons: 3,
+    totalVolumeM3: 0.15,
+    calculatedItemCount: 2,
+    missingItemCount: 0,
+    missingContactSheetNos: []
+  });
+  assert.match(shipmentsPageSource, /loadPackagingVersions/);
+  assert.match(shipmentsPageSource, /预计装柜总体积/);
+  assert.match(shipmentsPageSource, /每个批号的零头箱分别向上取整为整箱/);
+});
+
+test('已创建发货的装柜清单复用同一算法展示每批体积和总体积', () => {
+  const lines = calculateShipmentDraftVolumeLines([
+    { contact_sheet_id: 'sheet-1', batch_id: 'batch-1', availableQty: 101, shippedQty: 101 },
+    { contact_sheet_id: 'sheet-1', batch_id: 'batch-2', availableQty: 1, shippedQty: 1 }
+  ], [{
+    id: 'sheet-1', contact_sheet_no: 'CS-001', unit: '支', pcs_per_carton: 100, packaging_profile_version_id: 'version-1'
+  }], [{
+    id: 'version-1', quantity_per_carton: 100, quantity_unit: '支/箱', carton_volume_m3: 0.05
+  }]);
+
+  assert.deepEqual(lines, [
+    { cartons: 2, volumeM3: 0.1, isCalculated: true, contactSheetNo: 'CS-001' },
+    { cartons: 1, volumeM3: 0.05, isCalculated: true, contactSheetNo: 'CS-001' }
+  ]);
+  assert.match(shipmentsPageSource, /max-w-5xl/);
+  assert.match(shipmentsPageSource, /max-h-\[52vh\]/);
+  assert.match(shipmentsPageSource, /预计体积/);
+  assert.match(shipmentsPageSource, /预计总体积/);
+});
+
+test('小眼睛明细按合同、联系单和批号自然升序排列', () => {
+  const rows = buildShipmentPlanDisplayRows([
+    { id: '4', shipment_id: 's4', contact_sheet_id: 'cs4', contract_no: 'PO10', contact_sheet_no: 'B1', batch_no: 'A1', material_no: 'DEMO-M-4', product_name: '产品4', specification: '1g', unit: '支', shipped_quantity: 1, amount: 1, volume: { cartons: 1, volumeM3: 0.1, isCalculated: true, contactSheetNo: 'B1' } },
+    { id: '2', shipment_id: 's2', contact_sheet_id: 'cs2', contract_no: 'PO2', contact_sheet_no: 'B2', batch_no: 'A10', material_no: 'DEMO-M-2', product_name: '产品2', specification: '1g', unit: '支', shipped_quantity: 1, amount: 1, volume: { cartons: 1, volumeM3: 0.1, isCalculated: true, contactSheetNo: 'B2' } },
+    { id: '3', shipment_id: 's3', contact_sheet_id: 'cs3', contract_no: 'PO2', contact_sheet_no: 'B10', batch_no: 'A1', material_no: 'DEMO-M-3', product_name: '产品3', specification: '1g', unit: '支', shipped_quantity: 1, amount: 1, volume: { cartons: 1, volumeM3: 0.1, isCalculated: true, contactSheetNo: 'B10' } },
+    { id: '1', shipment_id: 's1', contact_sheet_id: 'cs2', contract_no: 'PO2', contact_sheet_no: 'B2', batch_no: 'A2', material_no: 'DEMO-M-2', product_name: '产品2', specification: '1g', unit: '支', shipped_quantity: 1, amount: 1, volume: { cartons: 1, volumeM3: 0.1, isCalculated: true, contactSheetNo: 'B2' } }
+  ], 'batch');
+
+  assert.deepEqual(rows.map((row) => [row.contract_no, row.contact_sheet_no, row.batch_no]), [
+    ['PO2', 'B2', 'A2'],
+    ['PO2', 'B2', 'A10'],
+    ['PO2', 'B10', 'A1'],
+    ['PO10', 'B1', 'A1']
+  ]);
+});
+
+test('每联系单一行汇总数量、金额、批号和每批取整后的箱数体积', () => {
+  const rows = buildShipmentPlanDisplayRows([
+    { id: '1', shipment_id: 's1', contact_sheet_id: 'cs1', contract_no: 'PO1', contact_sheet_no: 'B1', batch_no: '262062031', material_no: 'DEMO-M-01', product_name: '产品', specification: '1g', unit: '支', shipped_quantity: 101, amount: 101, volume: { cartons: 2, volumeM3: 0.1, isCalculated: true, contactSheetNo: 'B1' } },
+    { id: '2', shipment_id: 's1', contact_sheet_id: 'cs1', contract_no: 'PO1', contact_sheet_no: 'B1', batch_no: '262062032', material_no: 'DEMO-M-01', product_name: '产品', specification: '1g', unit: '支', shipped_quantity: 1, amount: 1, volume: { cartons: 1, volumeM3: 0.05, isCalculated: true, contactSheetNo: 'B1' } }
+  ], 'contact-sheet');
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].batch_no, '262062031-32');
+  assert.equal(rows[0].material_no, 'DEMO-M-01');
+  assert.equal(rows[0].shipped_quantity, 102);
+  assert.equal(rows[0].amount, 102);
+  assert.equal(rows[0].batchCount, 2);
+  assert.equal(rows[0].volume.cartons, 3);
+  assert.equal(rows[0].volume.volumeM3, 0.15);
+  assert.equal(summarizeShipmentBatchNumbers(['262062035', '262062031', '262062034', '262062032', '262062033']), '262062031-35');
+  assert.match(shipmentsPageSource, /每联系单1行/);
+  assert.match(shipmentsPageSource, /detail_mode/);
+});
+
+test('缺少包装版本时总体积保留已计算部分并明确未计入项', () => {
+  const summary = summarizeShipmentDraftVolume([
+    { contract_no: 'PO-001', contact_sheet_id: 'sheet-ready', batch_id: 'batch-ready', availableQty: 100, shippedQty: 100 },
+    { contract_no: 'PO-002', contact_sheet_id: 'sheet-missing', batch_id: 'batch-missing', availableQty: 100, shippedQty: 50 }
+  ], [
+    { id: 'sheet-ready', contact_sheet_no: 'CS-READY', unit: '盒', pcs_per_carton: 10, packaging_profile_version_id: 'version-ready' },
+    { id: 'sheet-missing', contact_sheet_no: 'CS-MISSING', unit: '盒', pcs_per_carton: 10, packaging_profile_version_id: null }
+  ], [
+    { id: 'version-ready', quantity_per_carton: 10, quantity_unit: '盒/箱', carton_volume_m3: 0.02 }
+  ]);
+
+  assert.equal(summary.totalCartons, 10);
+  assert.equal(summary.totalVolumeM3, 0.2);
+  assert.equal(summary.calculatedItemCount, 1);
+  assert.equal(summary.missingItemCount, 1);
+  assert.deepEqual(summary.missingContactSheetNos, ['CS-MISSING']);
+});
+
+test('包装单位与联系单单位不一致时不生成误导性体积', () => {
+  const summary = summarizeShipmentDraftVolume([
+    { contact_sheet_id: 'sheet-1', batch_id: 'batch-1', availableQty: 100, shippedQty: 100 }
+  ], [{
+    id: 'sheet-1', contact_sheet_no: 'CS-001', unit: '瓶', pcs_per_carton: 100, packaging_profile_version_id: 'version-1'
+  }], [{
+    id: 'version-1', quantity_per_carton: 100, quantity_unit: '支/箱', carton_volume_m3: 0.05
+  }]);
+
+  assert.equal(summary.totalVolumeM3, 0);
+  assert.equal(summary.calculatedItemCount, 0);
+  assert.equal(summary.missingItemCount, 1);
+});
+
 test('创建发货时可以一键满发并一键清空当前全部可发明细', () => {
   const allocations = [
     { contract_no: 'PO-001', contact_sheet_id: 'sheet-1', batch_id: 'batch-1', availableQty: 100, shippedQty: 20 },
@@ -87,6 +203,36 @@ test('一键满发不会把浮点残差写入数量输入框', () => {
 test('编辑历史发货时保留没有批次 ID 的原有发货明细', () => {
   assert.match(shipmentsPageSource, /sheet\.business_type === '原料药' \|\| sheet\.is_historical/);
   assert.match(shipmentsPageSource, /历史数据未记录批次/);
+});
+
+test('准备中安排可整体编辑，确认后只允许作废并复制', () => {
+  assert.match(shipmentsPageSource, /db\.updatePreparingShipmentGroup/);
+  assert.match(shipmentsPageSource, /可新增、删减或调整产品与批次数量/);
+  assert.match(shipmentsPageSource, /shipment\.status === '准备中' && shipment\.shipment_group_id/);
+  assert.match(shipmentsPageSource, /db\.voidAndCopyShipmentGroup/);
+  assert.match(shipmentsPageSource, /已确认实际发货后不能再修改产品、批次、数量或日期/);
+});
+
+test('已发货或已开票后仍可导出实际发货清单', () => {
+  assert.match(shipmentsPageSource, /shipment\.shipment_group_id && shipment\.status !== '取消'/);
+  assert.match(shipmentsPageSource, /shipment\.status === '准备中' \? '导出安排' : '实际发货清单'/);
+  assert.match(shipmentsPageSource, /const exportLabel = shipment\.status === '准备中' \? '发货安排' : '实际发货清单'/);
+});
+
+test('发货回款状态只显示已收齐或未收齐并统一复用实时覆盖算法', () => {
+  assert.match(shipmentsPageSource, /calculateShipmentPaymentCoverage/);
+  assert.match(shipmentsPageSource, /summarizeShipmentPaymentCoverage/);
+  assert.match(shipmentsPageSource, /合同级收款按发货日期先后抵扣/);
+  assert.doesNotMatch(shipmentsPageSource, /各合同发货前收款校验/);
+  assert.doesNotMatch(shipmentsPageSource, /paymentStatuses\.includes\('不建议发货'\)/);
+});
+
+test('确认实际发货只登记日期并提醒从小眼睛核对现有明细', () => {
+  assert.match(shipmentsPageSource, /请先通过列表右侧的小眼睛核对发货明细/);
+  assert.match(shipmentsPageSource, /label="核对发货明细"/);
+  assert.match(shipmentsPageSource, /产品与数量以当前发货安排为准/);
+  assert.doesNotMatch(shipmentsPageSource, /核对实际发货数量|可填 0 移除某条明细/);
+  assert.doesNotMatch(shipmentsPageSource, /dispatchAllocations\.map/);
 });
 
 test('发货工作台先显示待开票并在同状态内按日期倒序', () => {

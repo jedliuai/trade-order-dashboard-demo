@@ -41,3 +41,10 @@ test('数据库约束名可以映射回具体外径输入框', () => {
   );
   assert.equal(packagingConstraintField('some_other_error'), null);
 });
+
+test('脱敏后的数据库校验提示仍可定位到具体外径输入框', () => {
+  assert.equal(
+    packagingConstraintField('外箱外径宽不能小于外箱内径宽，请核对这两个数值。'),
+    'carton_outer_width_mm'
+  );
+});

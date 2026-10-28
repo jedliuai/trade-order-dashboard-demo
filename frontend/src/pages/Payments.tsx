@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../services/dataStore';
 import { useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, X, FileSpreadsheet, Layers, Building, Calendar, DollarSign, ListFilter, Copy } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, FileSpreadsheet, Layers, Building, Calendar, DollarSign, ListFilter, Copy, ChevronDown, ChevronRight } from 'lucide-react';
 import type { Payment, PaymentReceipt, ShipmentItem } from '../services/dataStore';
-import { formatLocalDate } from '../services/dateUtils';
-import { balanceLastPaymentAllocation, createCustomerDepositLedgerRow, getContractOutstandingAmount, getReceivableContracts, normalizeMoneyAmount, sortPaymentLedger, summarizePaymentAllocations, updatePaymentAllocationWithAutoRemainder } from '../services/financialRules';
+import { addDaysToLocalDate, formatLocalDate } from '../services/dateUtils';
+import { balanceLastPaymentAllocation, getContractAmount, getContractOutstandingAmount, getReceivableContracts, normalizeMoneyAmount, summarizePaymentAllocations, updatePaymentAllocationWithAutoRemainder } from '../services/financialRules';
 import { Dialog } from '../components/Dialog';
-import { FilterPanel, PageHeader } from '../components/PageHeader';
+import { PageHeader } from '../components/PageHeader';
 import { useFeedback } from '../components/FeedbackProvider';
 import { FormField } from '../components/FormField';
 import { SearchableCombobox } from '../components/SearchableCombobox';
@@ -15,36 +15,27 @@ import { IconButton } from '../components/IconButton';
 import { Button } from '../components/Button';
 import { DataTable } from '../components/DataTable';
 import { PaginationControls } from '../components/PaginationControls';
+import { handleTabListKeyDown } from '../components/tabKeyboard';
 import { usePagedRows } from '../hooks/usePagedRows';
-import { getFiscalYearRange, isDateInRange } from '../services/fiscalYear';
+import { getFiscalYearRange } from '../services/fiscalYear';
 import {
   calculateCurrentReceivables,
   filterCurrentReceivableFacts,
-  groupPaymentsByCustomer,
   summarizeCurrentReceivableRmb,
   summarizeOutstandingContractsRmb
 } from '../services/receivablesWorkspace';
 import { CustomerBalancePanel } from './CustomerBalancePanel';
 import { buildPaymentAccountingMessage } from '../services/paymentAccountingMessage';
-import { deriveReceiptPaymentType, PAYMENT_TYPE_OPTIONS, type PaymentType } from '../services/paymentAllocationTypes';
+import { buildPaymentReceiptLedger, filterPaymentReceiptLedger, type ReceiptLedgerRow } from '../services/paymentReceiptLedger';
 
 type PaymentAmountLike = { amount: number; amount_rmb?: number; currency: 'USD' | 'RMB' };
-type CustomerDepositReceipt = PaymentReceipt & {
-  customer_name: string;
-  allocated_amount: number;
-  deposit_amount: number;
+type CustomerReceiptGroup = {
+  customerName: string;
+  rows: ReceiptLedgerRow[];
+  totalAmountRmb: number;
+  totalAmountUsd: number;
+  hasUsdPayments: boolean;
 };
-type CustomerLedgerRow = Omit<Payment, 'payment_type' | 'export_type'> & {
-  payment_type: Payment['payment_type'] | '客户预存款';
-  export_type: Payment['export_type'] | '';
-  is_customer_deposit?: boolean;
-  deposit_receipt?: CustomerDepositReceipt;
-};
-
-function amountRmbOrZero(payment: PaymentAmountLike) {
-  if (payment.amount_rmb !== undefined && payment.amount_rmb !== null) return payment.amount_rmb;
-  return payment.currency === 'RMB' ? payment.amount : 0;
-}
 
 function formatPaymentRmb(payment: PaymentAmountLike) {
   if (payment.amount_rmb !== undefined && payment.amount_rmb !== null) {
@@ -53,29 +44,32 @@ function formatPaymentRmb(payment: PaymentAmountLike) {
   return payment.currency === 'RMB' ? `￥${payment.amount.toLocaleString()}` : '缺汇率';
 }
 
+function formatContractTotal(amount: number, currency: 'USD' | 'RMB') {
+  return amount > 0.005 ? `${currency === 'USD' ? '$' : '￥'}${amount.toLocaleString()}` : '待录入';
+}
+
 interface PaymentsProps {
   onNavigate?: (tab: string) => void;
   onRefreshData: () => void;
   onRefreshTrigger: number;
-  initialView?: 'all' | 'customer' | 'balance';
+  initialView?: 'customer' | 'balance';
 }
 
 export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, onRefreshTrigger, initialView = 'customer' }) => {
   const { confirm, notify } = useFeedback();
   const fiscalRange = useMemo(() => getFiscalYearRange(), []);
-  const [viewMode, setViewMode] = useState<'all' | 'customer' | 'balance'>(initialView);
-  const [ledgerPeriod, setLedgerPeriod] = useState<'fiscal' | 'history'>('fiscal');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'customer' | 'balance'>(initialView);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingReceiptId, setEditingReceiptId] = useState<string | null>(null);
   const [editingContractIds, setEditingContractIds] = useState<string[]>([]);
+  const [expandedReceiptIds, setExpandedReceiptIds] = useState<Set<string>>(() => new Set());
 
   // Form State
   const [formCustomerId, setFormCustomerId] = useState('');
   const [receiptNo, setReceiptNo] = useState('');
   const [receiptTotalAmount, setReceiptTotalAmount] = useState(0);
-  const [paymentAllocations, setPaymentAllocations] = useState<{ id?: string; contract_id: string; shipment_id: string; amount: number; payment_type: PaymentType }[]>([]);
+  const [paymentAllocations, setPaymentAllocations] = useState<{ id?: string; contract_id: string; amount: number }[]>([]);
   const [paymentDate, setPaymentDate] = useState(formatLocalDate());
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -87,7 +81,6 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
   const [dateFrom, setDateFrom] = useState<string>(fiscalRange.startDate);
   const [dateTo, setDateTo] = useState<string>(fiscalRange.endDate);
   const [filterContractId, setFilterContractId] = useState<string>('all');
-  const [filterPaymentType, setFilterPaymentType] = useState<string>('all');
   const [filterExportType, setFilterExportType] = useState<string>('all');
   const [filterCurrency, setFilterCurrency] = useState<string>('all');
   const [groupByCustomer, setGroupByCustomer] = useState<boolean>(false);
@@ -119,23 +112,33 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
       .sort((a, b) => b.effective_month.localeCompare(a.effective_month))[0]?.rate || 0;
   }, [rates]);
 
-  // Original view payment filtering
-  const filteredPayments = useMemo(() => {
-    return sortPaymentLedger(payments.filter(p => {
-      const inFiscalYear = isDateInRange(p.payment_date, fiscalRange.startDate, fiscalRange.endDate);
-      if (ledgerPeriod === 'fiscal' ? !inFiscalYear : inFiscalYear) return false;
-      return p.contract_no.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.payment_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        Boolean(p.notes && p.notes.toLowerCase().includes(searchQuery.toLowerCase()));
-    }));
-  }, [payments, searchQuery, ledgerPeriod, fiscalRange]);
+  const contractTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    contactSheets.forEach((sheet) => {
+      totals.set(sheet.contract_id, (totals.get(sheet.contract_id) || 0) + sheet.quantity * sheet.unit_price);
+    });
+    return totals;
+  }, [contactSheets]);
 
-  const paymentPeriodCounts = useMemo(() => payments.reduce((counts, payment) => {
-    if (isDateInRange(payment.payment_date, fiscalRange.startDate, fiscalRange.endDate)) counts.fiscal += 1;
-    else counts.history += 1;
+  const receiptLedgerRows = useMemo(() => buildPaymentReceiptLedger({
+    payments,
+    receipts: paymentReceipts,
+    customers,
+    contracts,
+    contractTotals,
+  }), [payments, paymentReceipts, customers, contracts, contractTotals]);
+
+  const historyEndDate = useMemo(() => addDaysToLocalDate(fiscalRange.startDate, -1), [fiscalRange.startDate]);
+  const paymentPeriodCounts = useMemo(() => receiptLedgerRows.reduce((counts, row) => {
+    if (row.payment_date >= fiscalRange.startDate && row.payment_date <= fiscalRange.endDate) counts.fiscal += 1;
+    else if (row.payment_date < fiscalRange.startDate) counts.history += 1;
     return counts;
-  }, { fiscal: 0, history: 0 }), [payments, fiscalRange]);
+  }, { fiscal: 0, history: 0 }), [receiptLedgerRows, fiscalRange.startDate, fiscalRange.endDate]);
+  const activePeriodPreset = dateFrom === fiscalRange.startDate && dateTo === fiscalRange.endDate
+    ? 'fiscal'
+    : dateFrom === '' && dateTo === historyEndDate
+      ? 'history'
+      : 'custom';
 
   // Selected contract details for automated currency mapping
   const formContracts = useMemo(() => getReceivableContracts(
@@ -177,7 +180,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
   const addPaymentAllocation = () => {
     setPaymentAllocations((current) => balanceLastPaymentAllocation(receiptTotalAmount, [
       ...current,
-      { contract_id: '', shipment_id: '', amount: 0, payment_type: '预付款' as PaymentType }
+      { contract_id: '', amount: 0 }
     ]));
   };
 
@@ -209,95 +212,21 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     };
   }, [formCurrency, paymentDate, rates]);
 
-  const customerDepositReceipts = useMemo<CustomerDepositReceipt[]>(() => {
-    const allocatedByReceipt = payments.reduce((map, payment) => {
-      if (payment.receipt_id) map.set(payment.receipt_id, (map.get(payment.receipt_id) || 0) + payment.amount);
-      return map;
-    }, new Map<string, number>());
-    return paymentReceipts
-      .map((receipt) => ({
-        ...receipt,
-        customer_name: customers.find((customer) => customer.id === receipt.customer_id)?.name || '未知客户',
-        allocated_amount: allocatedByReceipt.get(receipt.id) || 0,
-        deposit_amount: normalizeMoneyAmount(receipt.total_amount - (allocatedByReceipt.get(receipt.id) || 0))
-      }))
-      .filter((receipt) => receipt.deposit_amount > 0.005)
-      .filter((receipt) => selectedCustomerId === 'all' || receipt.customer_id === selectedCustomerId)
-      .filter((receipt) => !dateFrom || receipt.payment_date >= dateFrom)
-      .filter((receipt) => !dateTo || receipt.payment_date <= dateTo)
-      .filter(() => filterContractId === 'all' && filterExportType === 'all')
-      .filter(() => filterPaymentType === 'all' || filterPaymentType === '客户预存款')
-      .filter((receipt) => filterCurrency === 'all' || receipt.currency === filterCurrency)
-      .filter((receipt) => {
-        if (!customerSearchQuery) return true;
-        const query = customerSearchQuery.toLocaleLowerCase();
-        return `${receipt.customer_name} ${receipt.receipt_no || ''} ${receipt.notes || ''}`.toLocaleLowerCase().includes(query);
-      })
-      .sort((a, b) => b.payment_date.localeCompare(a.payment_date) || b.created_at.localeCompare(a.created_at));
-  }, [paymentReceipts, payments, customers, selectedCustomerId, dateFrom, dateTo, filterContractId, filterPaymentType, filterExportType, filterCurrency, customerSearchQuery]);
-
   // Dropdown list of contracts filtered by selected customer
   const filteredContractsDropdown = useMemo(() => {
     if (selectedCustomerId === 'all') return contracts;
     return contracts.filter(c => c.customer_id === selectedCustomerId);
   }, [selectedCustomerId, contracts]);
 
-  // Customer View filter logic
-  const customerFilteredPayments = useMemo(() => {
-    return sortPaymentLedger(payments.filter(p => {
-      // 1. Customer filter
-      if (selectedCustomerId !== 'all' && p.customer_id !== selectedCustomerId) {
-        return false;
-      }
-      // 2. Date range filter
-      if (dateFrom && p.payment_date < dateFrom) return false;
-      if (dateTo && p.payment_date > dateTo) return false;
-      // 3. Contract filter
-      if (filterContractId !== 'all' && p.contract_id !== filterContractId) {
-        return false;
-      }
-      // 4. Payment type filter
-      if (filterPaymentType !== 'all' && p.payment_type !== filterPaymentType) {
-        return false;
-      }
-      // 5. Export type filter
-      if (filterExportType !== 'all' && p.export_type !== filterExportType) {
-        return false;
-      }
-      // 6. Currency filter
-      if (filterCurrency !== 'all' && p.currency !== filterCurrency) {
-        return false;
-      }
-      // 7. Search query filter
-      if (customerSearchQuery) {
-        const query = customerSearchQuery.toLowerCase();
-        const matchesContract = p.contract_no && p.contract_no.toLowerCase().includes(query);
-        const matchesCustomer = p.customer_name && p.customer_name.toLowerCase().includes(query);
-        const matchesReceipt = p.receipt_no && p.receipt_no.toLowerCase().includes(query);
-        const matchesNotes = p.notes && p.notes.toLowerCase().includes(query);
-        const contract = contracts.find(c => c.id === p.contract_id);
-        const matchesPO = contract && (
-          (contract.notes && contract.notes.toLowerCase().includes(query)) ||
-          (contract.internal_contract_seq && contract.internal_contract_seq.toLowerCase().includes(query))
-        );
-        if (!matchesContract && !matchesCustomer && !matchesReceipt && !matchesNotes && !matchesPO) {
-          return false;
-        }
-      }
-      return true;
-    }));
-  }, [payments, selectedCustomerId, dateFrom, dateTo, filterContractId, filterPaymentType, filterExportType, filterCurrency, customerSearchQuery, contracts]);
-
-  const customerLedgerRows = useMemo<CustomerLedgerRow[]>(() => {
-    const depositRows: CustomerLedgerRow[] = customerDepositReceipts.map((receipt) => ({
-      ...createCustomerDepositLedgerRow(receipt),
-      deposit_receipt: receipt
-    }));
-    return sortPaymentLedger([
-      ...customerFilteredPayments.map((payment) => ({ ...payment, is_customer_deposit: false })),
-      ...depositRows
-    ]);
-  }, [customerDepositReceipts, customerFilteredPayments]);
+  const customerReceiptRows = useMemo(() => filterPaymentReceiptLedger(receiptLedgerRows, {
+    customerId: selectedCustomerId,
+    dateFrom,
+    dateTo,
+    contractId: filterContractId,
+    exportType: filterExportType,
+    currency: filterCurrency,
+    keyword: customerSearchQuery,
+  }), [receiptLedgerRows, selectedCustomerId, dateFrom, dateTo, filterContractId, filterExportType, filterCurrency, customerSearchQuery]);
 
   const receivableSnapshot = useMemo(() => {
     const rateForDate = (date: string | null | undefined) => {
@@ -341,7 +270,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
 
   // Customer View KPI Card stats. 起止日期仅限定实际到账；两项余额均为截止日快照。
   const customerKPIs = useMemo(() => {
-    const totalRmb = customerLedgerRows.reduce((sum, p) => sum + amountRmbOrZero(p), 0);
+    const totalRmb = customerReceiptRows.reduce((sum, row) => sum + (row.matched_amount_rmb || 0), 0);
     return {
       totalRmb,
       currentReceivableRmb: receivableSnapshot.currentReceivables.totalRmb,
@@ -349,57 +278,45 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
       outstandingContractRmb: receivableSnapshot.outstandingContracts.totalOutstandingRmb,
       outstandingContractMissingRateCount: receivableSnapshot.outstandingContracts.missingRateContractNos.length
     };
-  }, [customerLedgerRows, receivableSnapshot]);
+  }, [customerReceiptRows, receivableSnapshot]);
 
   // Customer Grouping View logic
-  const groupedPayments = useMemo(() => {
+  const groupedReceipts = useMemo<CustomerReceiptGroup[]>(() => {
     if (!groupByCustomer) return [];
-    return groupPaymentsByCustomer(customerLedgerRows);
-  }, [customerLedgerRows, groupByCustomer]);
-  const ledgerPage = usePagedRows(filteredPayments, `${ledgerPeriod}|${searchQuery}`);
+    const groups = new Map<string, ReceiptLedgerRow[]>();
+    customerReceiptRows.forEach((row) => groups.set(row.customer_name, [...(groups.get(row.customer_name) || []), row]));
+    return [...groups.entries()].map(([customerName, rows]) => ({
+      customerName,
+      rows,
+      totalAmountRmb: rows.reduce((sum, row) => sum + (row.matched_amount_rmb || 0), 0),
+      totalAmountUsd: rows.filter((row) => row.currency === 'USD').reduce((sum, row) => sum + row.matched_amount, 0),
+      hasUsdPayments: rows.some((row) => row.currency === 'USD'),
+    }));
+  }, [customerReceiptRows, groupByCustomer]);
   const customerPaymentPage = usePagedRows(
-    customerLedgerRows,
-    `${selectedCustomerId}|${dateFrom}|${dateTo}|${filterContractId}|${filterPaymentType}|${filterExportType}|${filterCurrency}|${customerSearchQuery}`
+    customerReceiptRows,
+    `${selectedCustomerId}|${dateFrom}|${dateTo}|${filterContractId}|${filterExportType}|${filterCurrency}|${customerSearchQuery}`
   );
   const customerGroupPage = usePagedRows(
-    groupedPayments,
-    `group|${selectedCustomerId}|${dateFrom}|${dateTo}|${filterContractId}|${filterPaymentType}|${filterExportType}|${filterCurrency}|${customerSearchQuery}`
+    groupedReceipts,
+    `group|${selectedCustomerId}|${dateFrom}|${dateTo}|${filterContractId}|${filterExportType}|${filterCurrency}|${customerSearchQuery}`
   );
-  const exportablePaymentRowCount = customerLedgerRows.length;
+  const exportablePaymentRowCount = customerReceiptRows.length;
 
-  const handleCopyAccountingMessage = async (row: CustomerLedgerRow) => {
-    const linkedReceipt = row.receipt_id
-      ? paymentReceipts.find((receipt) => receipt.id === row.receipt_id)
-      : row.deposit_receipt || null;
-    const receiptAllocations = linkedReceipt
-      ? payments.filter((payment) => payment.receipt_id === linkedReceipt.id)
-      : row.is_customer_deposit ? [] : [row as Payment];
-    const customerName = row.customer_name
-      || customers.find((customer) => customer.id === linkedReceipt?.customer_id)?.name
-      || '未知客户';
+  const handleCopyAccountingMessage = async (row: ReceiptLedgerRow) => {
     const message = buildPaymentAccountingMessage({
-      receipt: linkedReceipt ? {
-        id: linkedReceipt.id,
-        customer_name: customerName,
-        payment_date: linkedReceipt.payment_date,
-        total_amount: linkedReceipt.total_amount,
-        currency: linkedReceipt.currency,
-        payment_type: linkedReceipt.payment_type,
-      } : {
-        id: row.id,
-        customer_name: customerName,
+      receipt: {
+        id: row.receipt_id || row.id,
+        customer_name: row.customer_name,
         payment_date: row.payment_date,
-        total_amount: row.amount,
+        total_amount: row.total_amount,
         currency: row.currency,
-        payment_type: row.payment_type,
       },
-      allocations: receiptAllocations,
+      allocations: row.allocations,
       allPayments: payments,
       contractTotals: contracts.map((contract) => ({
         contract_id: contract.id,
-        total_amount: contactSheets
-          .filter((sheet) => sheet.contract_id === contract.id)
-          .reduce((sum, sheet) => sum + sheet.quantity * sheet.unit_price, 0),
+        total_amount: contractTotals.get(contract.id) || 0,
       })),
     });
 
@@ -428,19 +345,18 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     setIsExporting(true);
     setOperationError('');
     try {
-      await db.runLocalExport('export-payments', {
+      await db.runWorkerExport('export-payments', {
         customer_id: selectedCustomerId === 'all' ? '' : selectedCustomerId,
         date_from: dateFrom,
         date_to: dateTo,
         contract_id: filterContractId === 'all' ? '' : filterContractId,
-        payment_type: filterPaymentType === 'all' ? '' : filterPaymentType,
         export_type: filterExportType === 'all' ? '' : filterExportType,
         currency: filterCurrency === 'all' ? '' : filterCurrency,
         keyword: customerSearchQuery
       });
       notify({
         title: 'Excel 已导出',
-        message: `已按当前筛选导出 ${customerFilteredPayments.length} 条合同分摊和 ${customerDepositReceipts.length} 条客户预存款明细。`,
+        message: `已按当前筛选导出 ${customerReceiptRows.length} 笔实际到账及其合同分摊。`,
         tone: 'success'
       });
     } catch (error) {
@@ -479,7 +395,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     setFormCustomerId(targetContract.customer_id);
     setReceiptNo('');
     setReceiptTotalAmount(0);
-    setPaymentAllocations([{ contract_id: targetContract.id, shipment_id: '', amount: 0, payment_type: '预付款' }]);
+    setPaymentAllocations([{ contract_id: targetContract.id, amount: 0 }]);
     setPaymentDate(formatLocalDate());
     setNotes('');
     setOperationError('');
@@ -497,7 +413,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     setFormCustomerId(payment.customer_id || '');
     setReceiptNo(receipt?.receipt_no || '');
     setReceiptTotalAmount(receipt?.total_amount || payment.amount);
-    setPaymentAllocations(receiptPayments.map((row) => ({ id: row.id, contract_id: row.contract_id, shipment_id: row.shipment_id || '', amount: row.amount, payment_type: row.payment_type })));
+    setPaymentAllocations(receiptPayments.map((row) => ({ id: row.id, contract_id: row.contract_id, amount: row.amount })));
     setPaymentDate(receipt?.payment_date || payment.payment_date);
     setNotes(receipt?.notes || payment.notes || '');
     setOperationError('');
@@ -512,7 +428,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     setFormCustomerId(receipt.customer_id);
     setReceiptNo(receipt.receipt_no || '');
     setReceiptTotalAmount(receipt.total_amount);
-    setPaymentAllocations(receiptPayments.map((row) => ({ id: row.id, contract_id: row.contract_id, shipment_id: row.shipment_id || '', amount: row.amount, payment_type: row.payment_type })));
+    setPaymentAllocations(receiptPayments.map((row) => ({ id: row.id, contract_id: row.contract_id, amount: row.amount })));
     setPaymentDate(receipt.payment_date);
     setNotes(receipt.notes || '');
     setOperationError('');
@@ -566,15 +482,12 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
         payment_date: paymentDate,
         total_amount: normalizedReceiptTotal,
         currency: curr,
-        payment_type: deriveReceiptPaymentType(paymentAllocations),
         exchange_rate: rateVal,
         notes
       };
-      const allocations = paymentAllocations.map(({ contract_id, shipment_id, amount, payment_type }) => ({
+      const allocations = paymentAllocations.map(({ contract_id, amount }) => ({
         contract_id,
-        shipment_id: shipment_id || null,
-        amount: normalizeMoneyAmount(amount),
-        payment_type
+        amount: normalizeMoneyAmount(amount)
       }));
       if (editingReceiptId) {
         await db.updatePaymentReceipt(editingReceiptId, receiptPayload, allocations);
@@ -582,11 +495,10 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
         const row = allocations[0];
         await db.updatePayment(editingId, {
           contract_id: row.contract_id,
-          shipment_id: row.shipment_id || null,
+          shipment_id: null,
           payment_date: paymentDate,
           amount: row.amount,
           currency: curr,
-          payment_type: row.payment_type,
           exchange_rate: rateVal,
           amount_rmb: amtRmb,
           notes
@@ -596,6 +508,11 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
       }
       setShowAddModal(false);
       onRefreshData();
+      notify({
+        title: editingId || editingReceiptId ? '整笔收款已更新' : '整笔收款已登记',
+        message: '相关合同回款、预付款达标日和客户余额已重新计算。',
+        tone: 'success'
+      });
     } catch (error) {
       setOperationError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -603,21 +520,18 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     }
   };
 
-  const handleDelete = async (id: string) => {
-    const payment = payments.find((row) => row.id === id);
-    const receiptId = payment?.receipt_id;
+  const handleDeleteLedgerRow = async (row: ReceiptLedgerRow) => {
+    const allocationCount = row.allocations.length;
     const confirmed = await confirm({
-      title: receiptId ? '删除整笔组合收款？' : '删除这笔收款？',
-      message: receiptId
-        ? '这笔收款分摊到了多个合同。删除后，整笔收款及全部合同分摊都会移除，相关合同的回款进度将重新计算。'
-        : '删除后，该合同的回款进度和完成状态将重新计算。',
-      confirmLabel: receiptId ? '删除整笔收款' : '删除收款',
+      title: '删除整笔到账？',
+      message: `客户：${row.customer_name}\n实际到账：${row.currency === 'USD' ? '$' : '￥'}${row.total_amount.toLocaleString()}\n${allocationCount ? `涉及 ${allocationCount} 个合同分摊` : '当前全部为客户预存款'}${row.deposit_amount > 0.005 ? `，另含预存款 ${row.deposit_amount.toLocaleString()}` : ''}。\n\n删除后整笔到账及其全部分摊都会移除；客户录错时请删除后重新录入。`,
+      confirmLabel: '删除整笔到账',
       tone: 'danger'
     });
     if (!confirmed) return;
     try {
-      if (receiptId) await db.deletePaymentReceipt(receiptId);
-      else await db.deletePayment(id);
+      if (row.receipt_id) await db.deletePaymentReceipt(row.receipt_id);
+      else if (row.allocations[0]) await db.deletePayment(row.allocations[0].id);
       onRefreshData();
       notify({ title: '收款已删除', message: '相关合同的回款进度已重新计算。', tone: 'success' });
     } catch (error) {
@@ -625,21 +539,109 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
     }
   };
 
-  const handleDeleteDepositReceipt = async (receipt: CustomerDepositReceipt) => {
-    const confirmed = await confirm({
-      title: '删除这笔客户预存款？',
-      message: `客户：${receipt.customer_name}\n未分摊金额：${receipt.currency === 'USD' ? '$' : '￥'}${receipt.deposit_amount.toLocaleString()}\n删除后会移除整笔银行到账记录；如该收款还分摊到了合同，对应合同回款也会一起移除。`,
-      confirmLabel: '删除整笔收款',
-      tone: 'danger'
+  const toggleReceiptExpansion = (rowId: string) => {
+    setExpandedReceiptIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
     });
-    if (!confirmed) return;
-    try {
-      await db.deletePaymentReceipt(receipt.id);
-      onRefreshData();
-      notify({ title: '客户预存款已删除', message: '整笔到账及其合同分摊已重新计算。', tone: 'success' });
-    } catch (error) {
-      notify({ title: '客户预存款删除失败', message: error instanceof Error ? error.message : String(error), tone: 'error' });
-    }
+  };
+
+  const handleOpenLedgerEdit = (row: ReceiptLedgerRow) => {
+    if (row.receipt) handleOpenEditReceipt(row.receipt);
+    else if (!row.receipt_id && row.allocations[0]) handleOpenEdit(row.allocations[0]);
+  };
+
+  const navigateToContract = (contractNo: string) => {
+    if (!onNavigate) return;
+    sessionStorage.setItem('highlight_contract_no', contractNo);
+    onNavigate('contracts');
+  };
+
+  const receiptStatusLabel = (row: ReceiptLedgerRow) => {
+    if (!row.allocations.length) return '客户预存款';
+    if (row.allocations.length > 1) return '多合同分摊';
+    if (row.deposit_amount > 0.005) return '合同分摊 + 预存款';
+    return row.allocations[0].progress_status;
+  };
+
+  const renderContractNos = (row: ReceiptLedgerRow) => {
+    if (!row.contract_nos.length) return <span className="font-semibold text-brand-amber">客户预存款</span>;
+    const renderButton = (contractNo: string) => onNavigate ? (
+      <button type="button" key={contractNo} onClick={() => navigateToContract(contractNo)} className="font-bold text-brand-cyan hover:underline">{contractNo}</button>
+    ) : <span key={contractNo} className="font-bold text-slate-300">{contractNo}</span>;
+    return (
+      <>
+        <div className="hidden flex-wrap gap-x-2 gap-y-1 xl:flex">{row.contract_nos.map(renderButton)}</div>
+        <div className="flex flex-wrap gap-x-2 gap-y-1 xl:hidden">
+          {row.contract_nos.slice(0, 2).map(renderButton)}
+          {row.contract_nos.length > 2 && <span className="text-muted">其余 {row.contract_nos.length - 2} 个</span>}
+        </div>
+      </>
+    );
+  };
+
+  const renderAllocationDetails = (row: ReceiptLedgerRow, colSpan: number) => {
+    if (!row.is_expandable || !expandedReceiptIds.has(row.id)) return null;
+    return (
+      <tr id={`receipt-details-${row.id}`} className="bg-surface-muted/35">
+        <td colSpan={colSpan} className="px-4 pb-4 pt-2">
+          <div className="overflow-x-auto rounded-xl border border-border bg-surface/80">
+            <table className="w-full min-w-[720px] text-left text-[11px]">
+              <thead className="border-b border-border bg-surface-muted/60 text-muted">
+                <tr><th className="px-3 py-2.5">合同号</th><th className="px-3 py-2.5">本次分摊</th><th className="px-3 py-2.5">合同总额</th><th className="px-3 py-2.5">回款进度</th><th className="px-3 py-2.5">出口类型</th></tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {row.allocations.map((allocation) => (
+                  <tr key={allocation.id} className={row.matched_allocation_ids.includes(allocation.id) ? 'bg-brand-cyan/[0.035]' : ''}>
+                    <td className="px-3 py-2.5">{onNavigate ? <button type="button" onClick={() => navigateToContract(allocation.contract_no)} className="font-bold text-brand-cyan hover:underline">{allocation.contract_no}</button> : allocation.contract_no}</td>
+                    <td className="px-3 py-2.5 font-mono font-bold text-ink">{row.currency === 'USD' ? '$' : '￥'}{allocation.amount.toLocaleString()}</td>
+                    <td className={`px-3 py-2.5 font-mono ${allocation.contract_total > 0.005 ? 'text-body' : 'font-semibold text-brand-amber'}`}>{formatContractTotal(allocation.contract_total, row.currency)}</td>
+                    <td className="px-3 py-2.5"><span className={`rounded border px-2 py-0.5 font-semibold ${allocation.contract_total > 0.005 ? 'border-brand-emerald/20 bg-brand-emerald/10 text-brand-emerald' : 'border-brand-amber/25 bg-brand-amber/15 text-brand-amber'}`}>{allocation.progress_status}</span></td>
+                    <td className="px-3 py-2.5 text-body">{allocation.export_type}</td>
+                  </tr>
+                ))}
+                {row.deposit_amount > 0.005 && (
+                  <tr className="bg-brand-amber/[0.04]"><td className="px-3 py-2.5 font-semibold text-brand-amber">客户预存款</td><td className="px-3 py-2.5 font-mono font-bold text-brand-amber">{row.currency === 'USD' ? '$' : '￥'}{row.deposit_amount.toLocaleString()}</td><td colSpan={3} className="px-3 py-2.5 text-muted">暂未分配到合同；以后分配时以实际分配日作为生效日</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
+  const renderCustomerReceiptRow = (row: ReceiptLedgerRow, showCustomer: boolean) => {
+    const colSpan = showCustomer ? 9 : 8;
+    const singleAllocation = row.allocations.length === 1 ? row.allocations[0] : null;
+    return (
+      <React.Fragment key={row.id}>
+        <tr className={`transition-colors hover:bg-white/[0.01] ${row.deposit_amount > 0.005 ? 'bg-brand-amber/[0.025]' : ''}`}>
+          <td className="p-4 font-mono font-semibold text-slate-400">{row.payment_date}</td>
+          {showCustomer && <td className="p-4 font-bold text-slate-200">{row.customer_name}</td>}
+          <td className="p-4 font-mono font-bold text-white">
+            <div>{row.currency === 'USD' ? '$' : '￥'}{row.total_amount.toLocaleString()}</div>
+            {row.currency === 'USD' && <div className="mt-0.5 text-[10px] font-normal text-slate-500">折合: {formatPaymentRmb({ amount: row.total_amount, amount_rmb: row.amount_rmb, currency: row.currency })}{row.exchange_rate ? ` · 汇率 ${row.exchange_rate.toFixed(4)}` : ''}</div>}
+            {row.matched_amount !== row.total_amount && <div className="mt-1 text-[10px] font-normal text-brand-cyan">筛选命中 {row.currency === 'USD' ? '$' : '￥'}{row.matched_amount.toLocaleString()}</div>}
+          </td>
+          <td className="hidden p-4 lg:table-cell">
+            {row.is_composite ? (
+              <div><span className="font-semibold text-body">{row.allocations.length} 个合同</span>{row.deposit_amount > 0.005 && <div className="mt-1 text-[10px] text-brand-amber">含预存款 {row.deposit_amount.toLocaleString()}</div>}</div>
+            ) : singleAllocation ? (
+              <span className={`font-semibold ${singleAllocation.contract_total > 0.005 ? 'text-slate-400' : 'text-brand-amber'}`}>{formatContractTotal(singleAllocation.contract_total, row.currency)}</span>
+            ) : <span className="font-semibold text-brand-amber">全部预存</span>}
+          </td>
+          <td className="p-4"><div className="flex items-center gap-2">{row.is_expandable && <IconButton onClick={() => toggleReceiptExpansion(row.id)} label={`${expandedReceiptIds.has(row.id) ? '收起' : '展开'} ${row.allocations.length} 条合同分摊`} aria-expanded={expandedReceiptIds.has(row.id)} aria-controls={`receipt-details-${row.id}`} icon={expandedReceiptIds.has(row.id) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />} />}{renderContractNos(row)}</div></td>
+          <td className="hidden p-4 lg:table-cell"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${(row.deposit_amount > 0.005 && !row.allocations.length) || (singleAllocation && singleAllocation.contract_total <= 0.005) ? 'border-brand-amber/25 bg-brand-amber/15 text-brand-amber' : 'border-brand-emerald/20 bg-brand-emerald/10 text-brand-emerald'}`}>{receiptStatusLabel(row)}</span></td>
+          <td className="hidden p-4 lg:table-cell"><div className="flex flex-wrap gap-1">{row.export_types.length ? row.export_types.map((type) => <span key={type} className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${type === '自营' ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-amber-500/20 bg-amber-500/10 text-amber-500'}`}>{type}</span>) : <span className="text-muted">—</span>}</div></td>
+          <td className="hidden max-w-[200px] truncate p-4 text-slate-400 lg:table-cell" title={row.notes}>{row.notes || '-'}</td>
+          <td className="sticky right-0 z-10 min-w-[128px] bg-surface p-4 text-right"><div className="flex justify-end gap-1"><IconButton onClick={() => void handleCopyAccountingMessage(row)} label="复制会计入账文字" tone="primary" icon={<Copy className="w-3.5 h-3.5" />} /><IconButton onClick={() => handleOpenLedgerEdit(row)} disabled={Boolean(row.receipt_id && !row.receipt)} label="编辑整笔到账" icon={<Edit2 className="w-3.5 h-3.5" />} /><IconButton onClick={() => void handleDeleteLedgerRow(row)} disabled={Boolean(row.receipt_id && !row.receipt)} label="删除整笔到账" tone="danger" icon={<Trash2 className="w-3.5 h-3.5" />} /></div></td>
+        </tr>
+        {renderAllocationDetails(row, colSpan)}
+      </React.Fragment>
+    );
   };
 
   return (
@@ -648,7 +650,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
         title={viewMode === 'balance' ? '客户货款平衡中心' : '回款明细台账'}
         description={viewMode === 'balance'
           ? '按客户汇总累计收款与累计发货，快速判断是我方待交货，还是客户待付款'
-          : `登记汇款和信用证资金流水；默认显示本财年（${fiscalRange.label}），历史收款可在历史财年中查看`}
+          : `按银行实际到账登记资金流水；默认显示本财年（${fiscalRange.label}），历史收款可在历史财年中查看`}
         actions={viewMode === 'balance' ? undefined : (
           <Button
             onClick={handleOpenAdd}
@@ -660,148 +662,69 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
       />
 
       {/* Tabs Switcher */}
-      <div className="flex border-b border-white/[0.06] text-xs font-semibold">
+      <div className="grid grid-cols-2 border-b border-white/[0.06] text-xs font-semibold sm:flex" role="tablist" aria-label="回款视图" onKeyDown={handleTabListKeyDown}>
         <button
-          onClick={() => setViewMode('all')}
-          className={`px-6 py-3 border-b-2 transition-all ${
-            viewMode === 'all'
-              ? 'border-brand-cyan text-brand-cyan bg-white/[0.01]'
-              : 'border-transparent text-slate-400 hover:text-white hover:bg-white/[0.005]'
-          }`}
-        >
-          全部流水视图
-        </button>
-        <button
+          type="button"
+          id="payments-tab-customer"
+          role="tab"
+          aria-selected={viewMode === 'customer'}
+          aria-controls="payments-panel-customer"
+          aria-label="回款明细"
+          tabIndex={viewMode === 'customer' ? 0 : -1}
           onClick={() => setViewMode('customer')}
-          className={`px-6 py-3 border-b-2 transition-all ${
+          className={`min-w-0 border-b-2 px-2 py-3 text-center transition-all sm:px-6 ${
             viewMode === 'customer'
               ? 'border-brand-cyan text-brand-cyan bg-white/[0.01]'
               : 'border-transparent text-slate-400 hover:text-white hover:bg-white/[0.005]'
           }`}
         >
-          客户回款明细视图
+          回款明细
         </button>
         <button
+          type="button"
+          id="payments-tab-balance"
+          role="tab"
+          aria-selected={viewMode === 'balance'}
+          aria-controls="payments-panel-balance"
+          aria-label="客户货款平衡"
+          tabIndex={viewMode === 'balance' ? 0 : -1}
           onClick={() => setViewMode('balance')}
-          className={`px-6 py-3 border-b-2 transition-all ${
+          className={`min-w-0 border-b-2 px-2 py-3 text-center transition-all sm:px-6 ${
             viewMode === 'balance'
               ? 'border-brand-cyan text-brand-cyan bg-white/[0.01]'
               : 'border-transparent text-slate-400 hover:text-white hover:bg-white/[0.005]'
           }`}
         >
-          客户货款平衡
+          <span className="sm:hidden">货款平衡</span><span className="hidden sm:inline">客户货款平衡</span>
         </button>
       </div>
 
-      {viewMode === 'all' ? (
+      <div id={`payments-panel-${viewMode}`} role="tabpanel" aria-labelledby={`payments-tab-${viewMode}`} className="space-y-6">
+      {viewMode === 'customer' ? (
         <>
-          <div className="flex items-center gap-2 rounded-xl border border-border bg-surface-muted/45 p-1.5 text-xs font-semibold">
-            <button type="button" onClick={() => setLedgerPeriod('fiscal')} className={`rounded-lg px-4 py-2 transition-colors ${ledgerPeriod === 'fiscal' ? 'bg-surface text-brand-cyan shadow-sm' : 'text-muted hover:text-body'}`}>
-              本财年流水（{paymentPeriodCounts.fiscal}）
-            </button>
-            <button type="button" onClick={() => setLedgerPeriod('history')} className={`rounded-lg px-4 py-2 transition-colors ${ledgerPeriod === 'history' ? 'bg-surface text-brand-cyan shadow-sm' : 'text-muted hover:text-body'}`}>
-              历史财年（{paymentPeriodCounts.history}）
-            </button>
-          </div>
-          {/* Original View Filters */}
-          <FilterPanel className="flex flex-col items-stretch justify-between gap-4 text-xs md:flex-row md:items-center">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 w-4 h-4 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="text"
-                placeholder="搜索客户、合同号、收款类型、备注描述..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-slate-900/60 border border-white/[0.06] rounded-lg text-slate-200 focus:border-brand-cyan/50"
-              />
+          <div className="flex flex-col gap-3 rounded-xl border border-brand-cyan/20 bg-brand-cyan/[0.06] p-2.5 text-xs text-body sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-1.5" role="group" aria-label="回款日期快捷范围">
+              <button
+                type="button"
+                onClick={() => { setDateFrom(fiscalRange.startDate); setDateTo(fiscalRange.endDate); }}
+                aria-pressed={activePeriodPreset === 'fiscal'}
+                className={`rounded-lg px-3 py-2 font-semibold transition-colors ${activePeriodPreset === 'fiscal' ? 'bg-surface text-brand-cyan shadow-sm' : 'text-muted hover:bg-surface/70 hover:text-body'}`}
+              >
+                本财年（{paymentPeriodCounts.fiscal}）
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDateFrom(''); setDateTo(historyEndDate); }}
+                aria-pressed={activePeriodPreset === 'history'}
+                className={`rounded-lg px-3 py-2 font-semibold transition-colors ${activePeriodPreset === 'history' ? 'bg-surface text-brand-cyan shadow-sm' : 'text-muted hover:bg-surface/70 hover:text-body'}`}
+              >
+                历史收款（{paymentPeriodCounts.history}）
+              </button>
             </div>
-          </FilterPanel>
-          <div className="text-[11px] text-muted">显示 {filteredPayments.length} / {ledgerPeriod === 'fiscal' ? paymentPeriodCounts.fiscal : paymentPeriodCounts.history} 条{ledgerPeriod === 'fiscal' ? '本财年' : '历史'}流水</div>
-
-          {/* Original View Grid List */}
-          <DataTable ariaLabel="全部收款流水" className="glass-panel text-xs">
-                <thead>
-                  <tr className="border-b border-white/[0.08] bg-white/[0.02] text-slate-400 font-semibold select-none">
-                    <th className="p-4">客户</th>
-                    <th className="p-4">关联合同</th>
-                    <th className="p-4">收款日期</th>
-                    <th className="p-4">收款类型</th>
-                    <th className="p-4">收款外币额</th>
-                    <th className="p-4">入账汇率</th>
-                    <th className="p-4">折算人民币</th>
-                    <th className="p-4">备注描述</th>
-                    <th className="p-4 text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04]">
-                  {filteredPayments.length > 0 ? (
-                    ledgerPage.rows.map(p => (
-                      <tr key={p.id} className="hover:bg-white/[0.01] transition-colors">
-                        <td className="p-4 font-semibold text-slate-200">{p.customer_name || '未知客户'}</td>
-                        <td className="p-4 font-heading font-semibold text-slate-200">{p.contract_no}</td>
-                        <td className="p-4 text-slate-400">{p.payment_date}</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            p.payment_type === '预付款'
-                              ? 'bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/20'
-                              : 'bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/20'
-                          }`}>
-                            {p.payment_type}
-                          </span>
-                        </td>
-                        <td className="p-4 font-bold text-white">
-                          {p.currency === 'USD' ? '$' : '￥'}{p.amount.toLocaleString()}
-                        </td>
-                        <td className="p-4 text-slate-400">
-                          {p.exchange_rate ? p.exchange_rate.toFixed(4) : '-'}
-                        </td>
-                        <td className="p-4 font-bold text-slate-300">
-                          {p.amount_rmb !== undefined && p.amount_rmb !== null
-                            ? `￥${p.amount_rmb.toLocaleString()}`
-                            : p.currency === 'RMB'
-                              ? `￥${p.amount.toLocaleString()}`
-                              : <span className="text-brand-amber">缺汇率</span>}
-                        </td>
-                        <td className="p-4 text-slate-400 max-w-[200px] truncate" title={p.notes}>
-                          {p.notes || '-'}
-                        </td>
-                        <td className="p-4 text-right">
-                          <IconButton
-                            onClick={() => void handleCopyAccountingMessage(p)}
-                            label="复制会计入账文字"
-                            tone="primary"
-                            className="mr-2"
-                            icon={<Copy className="w-3.5 h-3.5" />}
-                          />
-                          <IconButton
-                            onClick={() => handleOpenEdit(p)}
-                            label="编辑收款记录"
-                            tone="primary"
-                            className="mr-2"
-                            icon={<Edit2 className="w-3.5 h-3.5" />}
-                          />
-                          <IconButton
-                            onClick={() => handleDelete(p.id)}
-                            label="删除收款记录"
-                            tone="danger"
-                            icon={<Trash2 className="w-3.5 h-3.5" />}
-                          />
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={9} className="p-10 text-center text-slate-500 italic bg-transparent">暂无收款记录，可点击上方按钮录入</td>
-                    </tr>
-                  )}
-                </tbody>
-          </DataTable>
-          <PaginationControls {...ledgerPage} onPageChange={ledgerPage.setPage} itemLabel="条收款流水" />
-        </>
-      ) : viewMode === 'customer' ? (
-        <>
-          <div className="rounded-xl border border-brand-cyan/20 bg-brand-cyan/[0.06] px-4 py-3 text-xs text-body">
-            当前回款考核周期：<span className="font-semibold text-brand-cyan">{dateFrom || '不限'} 至 {dateTo || '不限'}</span>；默认按本财年收款日期汇总，可在下方调整。
+            <div className="px-1 sm:text-right">
+              {activePeriodPreset === 'custom' && <span className="mr-2 rounded border border-brand-amber/20 bg-brand-amber/10 px-2 py-0.5 font-semibold text-brand-amber">自定义范围</span>}
+              当前回款考核周期：<span className="font-semibold text-brand-cyan">{dateFrom || '不限'} 至 {dateTo || '不限'}</span>
+            </div>
           </div>
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -838,7 +761,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
 
 
           {/* Customer View Filters */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3.5 p-4 rounded-xl glass-panel text-xs items-end border border-white/[0.04] bg-white/[0.01]">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 p-4 rounded-xl glass-panel text-xs items-end border border-white/[0.04] bg-white/[0.01]">
             <div className="space-y-1">
               <label className="text-slate-400 font-semibold flex items-center gap-1">
                 <Building className="w-3.5 h-3.5 text-brand-cyan" /> 选择客户
@@ -902,26 +825,6 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
                 emptyMessage="没有匹配的已有合同"
                 size="sm"
               />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-slate-400 font-semibold flex items-center gap-1">
-                <DollarSign className="w-3.5 h-3.5 text-slate-500" /> 收款类型
-              </label>
-              <select
-                value={filterPaymentType}
-                onChange={(e) => setFilterPaymentType(e.target.value)}
-                className="w-full bg-slate-800 border border-white/[0.06] rounded-lg px-2.5 py-2 text-slate-200"
-              >
-                <option value="all">全部类型</option>
-                <option value="预付款">预付款</option>
-                <option value="尾款">尾款</option>
-                <option value="分批付款">分批付款</option>
-                <option value="提单后付款">提单后付款</option>
-                <option value="信用证">信用证</option>
-                <option value="其他">其他</option>
-                <option value="客户预存款">客户预存款</option>
-              </select>
             </div>
 
             <div className="space-y-1">
@@ -996,280 +899,54 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
                   <tr className="border-b border-white/[0.08] bg-white/[0.02] text-slate-400 font-semibold select-none">
                     <th className="p-4">客户到账时间</th>
                     {selectedCustomerId === 'all' && !groupByCustomer && <th className="p-4">客户名称</th>}
-                    <th className="p-4">收款金额</th>
-                    <th className="p-4">合同总金额</th>
+                    <th className="p-4">实际到账</th>
+                    <th className="hidden p-4 lg:table-cell">分摊情况</th>
                     <th className="p-4">合同号 / PI号</th>
-                    <th className="p-4">收款类型</th>
-                    <th className="p-4">出口类型</th>
-                    <th className="p-4">备注</th>
-                    <th className="p-4 text-right">操作</th>
+                    <th className="hidden p-4 lg:table-cell">回款状态</th>
+                    <th className="hidden p-4 lg:table-cell">出口类型</th>
+                    <th className="hidden p-4 lg:table-cell">备注</th>
+                    <th className="sticky right-0 z-10 bg-surface-muted p-4 text-right">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.04]">
                   {groupByCustomer ? (
-                    groupedPayments.length > 0 ? (
-                      customerGroupPage.rows.map(({ customerName, paymentsList, totalAmountRmb, totalAmountUsd, hasUsdPayments }) => (
+                    groupedReceipts.length > 0 ? (
+                      customerGroupPage.rows.map(({ customerName, rows, totalAmountRmb, totalAmountUsd, hasUsdPayments }) => (
                         <React.Fragment key={customerName}>
-                          <tr className="bg-white/[0.02] border-t border-b border-white/[0.04]">
-                            <td colSpan={selectedCustomerId === 'all' && !groupByCustomer ? 9 : 8} className="p-3 pl-4">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="font-bold text-brand-cyan flex items-center gap-1.5">
-                                  🏢 客户: {customerName} <span className="text-[10px] text-slate-500 font-normal">({paymentsList.length} 笔款项)</span>
+                          <tr className="border-y border-white/[0.04] bg-white/[0.02]">
+                            <td colSpan={8} className="p-3 pl-4">
+                              <div className="flex flex-col items-start gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                                <span className="flex items-center gap-1.5 font-bold text-brand-cyan">
+                                  <Building className="h-3.5 w-3.5" /> 客户: {customerName} <span className="text-[10px] font-normal text-slate-500">({rows.length} 笔实际到账)</span>
                                 </span>
                                 <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 font-bold text-slate-400">
-                                  {hasUsdPayments && (
-                                    <span>
-                                      回款小计 (USD): <span className="text-brand-cyan font-mono">${totalAmountUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                    </span>
-                                  )}
-                                  <span>
-                                    回款小计 (RMB折合): <span className="text-white font-mono">￥{totalAmountRmb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                  </span>
+                                  {hasUsdPayments && <span>回款小计 (USD): <span className="font-mono text-brand-cyan">${totalAmountUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>}
+                                  <span>回款小计 (RMB折合): <span className="font-mono text-white">￥{totalAmountRmb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
                                 </div>
                               </div>
                             </td>
                           </tr>
-                          {paymentsList.map(p => {
-                            const sheets = contactSheets.filter(s => s.contract_id === p.contract_id);
-                            const contractAmount = sheets.reduce((sum, s) => sum + (s.quantity * s.unit_price), 0);
-                            const contract = contracts.find(c => c.id === p.contract_id);
-                            const contractAmtStr = contract ? (contract.currency === 'USD' ? '$' : '￥') + contractAmount.toLocaleString() : '-';
-
-                            return (
-                              <tr key={p.id} className={`transition-colors border-b border-white/[0.02] ${p.is_customer_deposit ? 'bg-brand-amber/[0.04] hover:bg-brand-amber/[0.07]' : 'hover:bg-white/[0.01]'}`}>
-                                <td className="p-4 text-slate-400 font-mono font-semibold">{p.payment_date}</td>
-                                <td className="p-4 font-mono font-bold text-white">
-                                  <div>{p.currency === 'USD' ? '$' : '￥'}{p.amount.toLocaleString()}</div>
-                                  {p.currency === 'USD' && (
-                                    <div className="text-[10px] text-slate-500 font-normal mt-0.5">
-                                      折合: {formatPaymentRmb(p)}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="p-4 text-slate-400 font-semibold">{contractAmtStr}</td>
-                                <td className="p-4">
-                                  {p.is_customer_deposit ? (
-                                    <span className="font-semibold text-muted">—</span>
-                                  ) : onNavigate ? (
-                                    <button
-                                      onClick={() => {
-                                        sessionStorage.setItem('highlight_contract_no', p.contract_no);
-                                        onNavigate('contracts');
-                                      }}
-                                      className="text-brand-cyan hover:underline font-bold text-left"
-                                      title="点击前往合同管理"
-                                    >
-                                      {p.contract_no}
-                                    </button>
-                                  ) : (
-                                    <span className="font-bold text-slate-300">{p.contract_no}</span>
-                                  )}
-                                </td>
-                                <td className="p-4">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    p.payment_type === '客户预存款'
-                                      ? 'bg-brand-amber/15 text-brand-amber border border-brand-amber/25'
-                                      : p.payment_type === '预付款'
-                                      ? 'bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/20'
-                                      : 'bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/20'
-                                  }`}>
-                                    {p.payment_type}
-                                  </span>
-                                </td>
-                                <td className="p-4">
-                                  {p.is_customer_deposit ? (
-                                    <span className="text-muted">—</span>
-                                  ) : (
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                                      p.export_type === '自营'
-                                        ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                                        : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
-                                    }`}>
-                                      {p.export_type}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="p-4 text-slate-400 truncate max-w-[200px]" title={p.notes}>
-                                  {p.notes || '-'}
-                                </td>
-                                <td className="p-4 text-right">
-                                  {p.is_customer_deposit && p.deposit_receipt ? (
-                                    <div className="flex justify-end gap-1">
-                                      <IconButton
-                                        onClick={() => void handleCopyAccountingMessage(p)}
-                                        label="复制会计入账文字"
-                                        tone="primary"
-                                        icon={<Copy className="w-3.5 h-3.5" />}
-                                      />
-                                      <IconButton
-                                        onClick={() => handleOpenEditReceipt(p.deposit_receipt!)}
-                                        label="编辑或分摊客户预存款"
-                                        icon={<Edit2 className="w-3.5 h-3.5" />}
-                                      />
-                                      <IconButton
-                                        onClick={() => void handleDeleteDepositReceipt(p.deposit_receipt!)}
-                                        label="删除客户预存款"
-                                        tone="danger"
-                                        icon={<Trash2 className="w-3.5 h-3.5" />}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="flex justify-end gap-1">
-                                      <IconButton
-                                        onClick={() => void handleCopyAccountingMessage(p)}
-                                        label="复制会计入账文字"
-                                        tone="primary"
-                                        icon={<Copy className="w-3.5 h-3.5" />}
-                                      />
-                                      <IconButton
-                                        onClick={() => handleDelete(p.id)}
-                                        label="删除收款记录"
-                                        tone="danger"
-                                        icon={<Trash2 className="w-3.5 h-3.5" />}
-                                      />
-                                    </div>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {rows.map((row) => renderCustomerReceiptRow(row, false))}
                         </React.Fragment>
                       ))
-                    ) : (
-                      <tr>
-                        <td colSpan={8} className="p-10 text-center text-slate-500 italic bg-transparent">
-                          暂无符合过滤条件的收款流水数据
-                        </td>
-                      </tr>
-                    )
+                    ) : <tr><td colSpan={8} className="bg-transparent p-10 text-center italic text-slate-500">暂无符合过滤条件的收款流水数据</td></tr>
+                  ) : customerReceiptRows.length > 0 ? (
+                    customerPaymentPage.rows.map((row) => renderCustomerReceiptRow(row, selectedCustomerId === 'all'))
                   ) : (
-                    customerLedgerRows.length > 0 ? (
-                      customerPaymentPage.rows.map(p => {
-                        const sheets = contactSheets.filter(s => s.contract_id === p.contract_id);
-                        const contractAmount = sheets.reduce((sum, s) => sum + (s.quantity * s.unit_price), 0);
-                        const contract = contracts.find(c => c.id === p.contract_id);
-                        const contractAmtStr = contract ? (contract.currency === 'USD' ? '$' : '￥') + contractAmount.toLocaleString() : '-';
-
-                        return (
-                          <tr key={p.id} className={`transition-colors ${p.is_customer_deposit ? 'bg-brand-amber/[0.04] hover:bg-brand-amber/[0.07]' : 'hover:bg-white/[0.01]'}`}>
-                            <td className="p-4 text-slate-400 font-mono font-semibold">{p.payment_date}</td>
-                            {selectedCustomerId === 'all' && (
-                              <td className="p-4 font-bold text-slate-200">{p.customer_name}</td>
-                            )}
-                            <td className="p-4 font-mono font-bold text-white">
-                              <div>{p.currency === 'USD' ? '$' : '￥'}{p.amount.toLocaleString()}</div>
-                              {p.currency === 'USD' && (
-                                <div className="text-[10px] text-slate-500 font-normal mt-0.5">
-                                  折合: {formatPaymentRmb(p)}
-                                </div>
-                              )}
-                            </td>
-                            <td className="p-4 text-slate-400 font-semibold">{contractAmtStr}</td>
-                            <td className="p-4">
-                              {p.is_customer_deposit ? (
-                                <span className="font-semibold text-muted">—</span>
-                              ) : onNavigate ? (
-                                <button
-                                  onClick={() => {
-                                    sessionStorage.setItem('highlight_contract_no', p.contract_no);
-                                    onNavigate('contracts');
-                                  }}
-                                  className="text-brand-cyan hover:underline font-bold text-left"
-                                  title="点击前往合同管理"
-                                >
-                                  {p.contract_no}
-                                </button>
-                              ) : (
-                                <span className="font-bold text-slate-300">{p.contract_no}</span>
-                              )}
-                            </td>
-                            <td className="p-4">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                p.payment_type === '客户预存款'
-                                  ? 'bg-brand-amber/15 text-brand-amber border border-brand-amber/25'
-                                  : p.payment_type === '预付款'
-                                  ? 'bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/20'
-                                  : 'bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/20'
-                              }`}>
-                                {p.payment_type}
-                              </span>
-                            </td>
-                            <td className="p-4">
-                              {p.is_customer_deposit ? (
-                                <span className="text-muted">—</span>
-                              ) : (
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                                  p.export_type === '自营'
-                                    ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                                    : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
-                                }`}>
-                                  {p.export_type}
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-4 text-slate-400 truncate max-w-[200px]" title={p.notes}>
-                              {p.notes || '-'}
-                            </td>
-                            <td className="p-4 text-right">
-                              {p.is_customer_deposit && p.deposit_receipt ? (
-                                <div className="flex justify-end gap-1">
-                                  <IconButton
-                                    onClick={() => void handleCopyAccountingMessage(p)}
-                                    label="复制会计入账文字"
-                                    tone="primary"
-                                    icon={<Copy className="w-3.5 h-3.5" />}
-                                  />
-                                  <IconButton
-                                    onClick={() => handleOpenEditReceipt(p.deposit_receipt!)}
-                                    label="编辑或分摊客户预存款"
-                                    icon={<Edit2 className="w-3.5 h-3.5" />}
-                                  />
-                                  <IconButton
-                                    onClick={() => void handleDeleteDepositReceipt(p.deposit_receipt!)}
-                                    label="删除客户预存款"
-                                    tone="danger"
-                                    icon={<Trash2 className="w-3.5 h-3.5" />}
-                                  />
-                                </div>
-                              ) : (
-                                <div className="flex justify-end gap-1">
-                                  <IconButton
-                                    onClick={() => void handleCopyAccountingMessage(p)}
-                                    label="复制会计入账文字"
-                                    tone="primary"
-                                    icon={<Copy className="w-3.5 h-3.5" />}
-                                  />
-                                  <IconButton
-                                    onClick={() => handleDelete(p.id)}
-                                    label="删除收款记录"
-                                    tone="danger"
-                                    icon={<Trash2 className="w-3.5 h-3.5" />}
-                                  />
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={selectedCustomerId === 'all' ? 9 : 8} className="p-10 text-center text-slate-500 italic bg-transparent">
-                          暂无符合过滤条件的收款流水数据
-                        </td>
-                      </tr>
-                    )
+                    <tr><td colSpan={selectedCustomerId === 'all' ? 9 : 8} className="bg-transparent p-10 text-center italic text-slate-500">暂无符合过滤条件的收款流水数据</td></tr>
                   )}
                 </tbody>
           </DataTable>
           {groupByCustomer ? (
             <PaginationControls {...customerGroupPage} onPageChange={customerGroupPage.setPage} itemLabel="组客户" />
           ) : (
-            <PaginationControls {...customerPaymentPage} onPageChange={customerPaymentPage.setPage} itemLabel="条回款明细" />
+            <PaginationControls {...customerPaymentPage} onPageChange={customerPaymentPage.setPage} itemLabel="笔实际到账" />
           )}
         </>
       ) : (
         <CustomerBalancePanel onRefreshTrigger={onRefreshTrigger} />
       )}
+      </div>
 
       {/* Add Payment Modal */}
       {showAddModal && (
@@ -1302,83 +979,66 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
                 </FormField>
               </div>
 
-              {formCustomerId && <div className="space-y-3"><div className="flex items-center justify-between gap-3"><div><label className="font-semibold text-slate-200">合同分摊（可选）</label><p className="mt-1 text-[10px] text-muted">每条合同分别选择收款类型；新增时最后一条会自动补齐剩余到账金额。</p></div><Button type="button" tone="warning" size="sm" disabled={!formContracts.length} icon={<Plus className="h-4 w-4" />} onClick={addPaymentAllocation} className="shadow-lg shadow-brand-amber/15">添加合同</Button></div>
+              {formCustomerId && <div className="space-y-3"><div className="flex items-center justify-between gap-3"><div><label className="font-semibold text-slate-200">合同分摊（可选）</label><p className="mt-1 text-[10px] text-muted">只登记客观金额；回款阶段与预付款达标日由系统累计计算。新增时最后一条会自动补齐剩余到账金额。</p></div><Button type="button" tone="warning" size="sm" disabled={!formContracts.length} icon={<Plus className="h-4 w-4" />} onClick={addPaymentAllocation} className="shadow-lg shadow-brand-amber/15">添加合同</Button></div>
                 <div className="grid grid-cols-3 gap-3 rounded-xl border border-border bg-surface-muted/45 p-3">
                   <div><div className="text-[10px] text-muted">实际到账</div><div className="mt-1 font-bold text-ink">{formCurrencySymbol}{receiptTotalAmount.toLocaleString()}</div></div>
                   <div><div className="text-[10px] text-muted">已分摊合同</div><div className="mt-1 font-bold text-brand-cyan">{formCurrencySymbol}{allocatedAmount.toLocaleString()}</div></div>
                   <div><div className="text-[10px] text-muted">客户预存款</div><div className={`mt-1 font-bold ${unallocatedAmount < -0.005 ? 'text-brand-rose' : unallocatedAmount <= 0.005 ? 'text-brand-emerald' : 'text-brand-amber'}`}>{formCurrencySymbol}{Math.max(0, unallocatedAmount).toLocaleString()}</div></div>
                 </div>
-                <p className="text-[11px] leading-5 text-muted">发货记录为高级可选项：通常保持“不指定发货记录”，系统会在合同内按发货日期先发先抵；只有明确要抵扣某一笔发货时才需要指定。</p>
                 <div className="space-y-2">{paymentAllocations.map((allocation, index) => {
                   const selectedIds = new Set(paymentAllocations.filter((_, rowIndex) => rowIndex !== index).map((row) => row.contract_id));
                   const availableContracts = formContracts.filter((contract) => !selectedIds.has(contract.id) && (!selectedContractInfo || contract.currency === selectedContractInfo.currency || allocation.contract_id === contract.id));
-                  const availableShipments = shipments.filter((shipment) => shipment.contract_id === allocation.contract_id);
+                  const comparablePayments = payments.filter((payment) => editingReceiptId ? payment.receipt_id !== editingReceiptId : payment.id !== editingId);
+                  const contractAmount = allocation.contract_id ? getContractAmount(allocation.contract_id, contactSheets) : 0;
+                  const allocationContract = allocation.contract_id ? contracts.find((contract) => contract.id === allocation.contract_id) : null;
                   const contractOutstanding = allocation.contract_id
                     ? getContractOutstandingAmount(
                         allocation.contract_id,
                         contactSheets,
-                        payments.filter((payment) => editingReceiptId ? payment.receipt_id !== editingReceiptId : payment.id !== editingId)
+                        comparablePayments
                       )
                     : 0;
                   return <div key={`${index}-${allocation.contract_id}`} className="space-y-2 rounded-xl border border-border bg-surface-muted/35 p-3">
-                    <div className="grid gap-2 md:grid-cols-[minmax(180px,1fr)_minmax(170px,1fr)_140px_150px_auto] md:items-center">
+                    <div className="grid gap-2 md:grid-cols-[minmax(0,1.6fr)_minmax(110px,0.8fr)_40px] md:items-center">
                     <SearchableCombobox
                       value={allocation.contract_id}
-                      onChange={(nextContractId) => setPaymentAllocations((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, contract_id: nextContractId, shipment_id: '' } : row))}
+                      onChange={(nextContractId) => setPaymentAllocations((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, contract_id: nextContractId } : row))}
                       options={availableContracts.map(contract => ({
                         value: contract.id,
                         label: `${contract.contract_no} · ${contract.currency}`,
-                        description: `剩余应收 ${contract.currency === 'USD' ? '$' : '￥'}${getContractOutstandingAmount(contract.id, contactSheets, payments.filter((payment) => editingReceiptId ? payment.receipt_id !== editingReceiptId : payment.id !== editingId)).toLocaleString()}`,
+                        description: getContractAmount(contract.id, contactSheets) > 0.005
+                          ? `剩余应收 ${contract.currency === 'USD' ? '$' : '￥'}${getContractOutstandingAmount(contract.id, contactSheets, comparablePayments).toLocaleString()}`
+                          : '合同金额待联系单形成，可先登记到账',
                         searchText: contract.contract_no
                       }))}
                       ariaLabel={`第 ${index + 1} 条分摊合同`}
                       placeholder="选择合同"
                       searchPlaceholder="输入合同号搜索"
                       emptyMessage="没有可分摊的匹配合同"
+                      className="min-w-0"
                     />
-                    <SearchableCombobox
-                      value={allocation.shipment_id}
-                      onChange={(nextShipmentId) => setPaymentAllocations((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, shipment_id: nextShipmentId } : row))}
-                      options={[
-                        { value: '', label: '不指定发货记录' },
-                        ...availableShipments.map(shipment => ({
-                          value: shipment.id,
-                          label: shipment.group_shipment_no || shipment.shipment_no,
-                          searchText: shipment.group_shipment_no || shipment.shipment_no
-                        }))
-                      ]}
-                      ariaLabel={`第 ${index + 1} 条分摊发货记录`}
-                      placeholder="不指定发货记录"
-                      searchPlaceholder="输入发货编号搜索"
-                      emptyMessage="没有匹配的发货记录"
-                      disabled={!allocation.contract_id}
-                    />
-                    <select
-                      value={allocation.payment_type}
-                      onChange={(event) => setPaymentAllocations((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, payment_type: event.target.value as PaymentType } : row))}
-                      aria-label={`第 ${index + 1} 条分摊收款类型`}
-                      className="rounded-lg border border-brand-amber/25 bg-slate-800 px-3 py-2.5 font-semibold text-slate-100"
-                    >
-                      {PAYMENT_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                    </select>
-                    <input type="number" min="0.0001" step="0.0001" inputMode="decimal" required value={allocation.amount || ''} onChange={(event) => changePaymentAllocationAmount(index, parseFloat(event.target.value) || 0)} placeholder="分摊金额" className="bg-slate-900/60 border border-white/[0.06] rounded-lg px-3 py-2.5 text-right text-slate-200" />
-                    <div className="flex items-center justify-end gap-1">
+                    <input type="number" min="0.0001" step="0.0001" inputMode="decimal" required value={allocation.amount || ''} onChange={(event) => changePaymentAllocationAmount(index, parseFloat(event.target.value) || 0)} placeholder="分摊金额" className="min-w-0 w-full rounded-lg border border-white/[0.06] bg-slate-900/60 px-3 py-2.5 text-right text-slate-200" />
+                    <div className="flex w-10 items-center justify-end gap-1">
+                      <IconButton type="button" onClick={() => removePaymentAllocation(index)} label={`移除第 ${index + 1} 个合同分摊`} tone="danger" size="md" icon={<Trash2 className="w-4 h-4" />} />
+                    </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {allocation.contract_id && (contractAmount > 0.005
+                        ? <div className="text-[10px] text-muted">该合同本次收款前剩余应收：<span className="font-semibold text-body">{allocationContract?.currency === 'USD' ? '$' : '￥'}{contractOutstanding.toLocaleString()}</span></div>
+                        : <div className="text-[10px] font-semibold text-brand-amber">合同金额待联系单形成，可先登记到账；回款率将在金额形成后自动计算。</div>)}
                       {allocation.id && editingReceiptId && (
                         <Button type="button" size="sm" tone="secondary" onClick={() => void handleReturnAllocationToDeposit(allocation.id!)}>
                           退回预存款
                         </Button>
                       )}
-                      <IconButton type="button" onClick={() => removePaymentAllocation(index)} label={`移除第 ${index + 1} 个合同分摊`} tone="danger" size="md" icon={<Trash2 className="w-4 h-4" />} />
                     </div>
-                    </div>
-                    {allocation.contract_id && <div className="text-[10px] text-muted">该合同本次收款前剩余应收：<span className="font-semibold text-body">{selectedContractInfo?.currency === 'USD' ? '$' : '￥'}{contractOutstanding.toLocaleString()}</span></div>}
                   </div>;
                 })}{!paymentAllocations.length && <div className="p-6 text-center text-slate-500 border border-dashed border-white/[0.08] rounded-xl">{formContracts.length ? '当前整笔金额将作为客户预存款；合同确定后可再次编辑并分摊' : '该客户暂无可分摊合同，整笔金额将作为客户预存款保存'}</div>}</div>
               </div>}
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-1"><label className="text-slate-400">收款日期</label><input type="date" required value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200" /></div>
-                <div className="rounded-lg border border-brand-amber/20 bg-brand-amber/5 px-3.5 py-2.5 text-[11px] leading-5 text-body"><strong className="text-ink">收款类型已移入合同明细。</strong><br />未分摊余额仍自动作为客户预存款。</div>
+                <div className="rounded-lg border border-brand-amber/20 bg-brand-amber/5 px-3.5 py-2.5 text-[11px] leading-5 text-body"><strong className="text-ink">无需选择预付款、尾款或全款。</strong><br />系统按合同约定比例与累计回款自动判断；未分摊余额继续作为客户预存款。</div>
               </div>
 
               {/* Automatic FX lookup and compute info */}

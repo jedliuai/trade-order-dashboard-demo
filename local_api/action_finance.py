@@ -5,6 +5,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from .store import ApiError, amount, iso_date, normalize_validate, number, now
 from .action_common import object_data, row_list, owned, update, trimmed, remove_children
+from .payment_progress import china_today
 
 
 def receipt_snapshot(tx, receipt):
@@ -20,17 +21,28 @@ def receipt_history(tx, receipt, before, action, reason):
     })
 
 
-def write_receipt_allocations(tx, receipt, allocation_rows, fallback_type):
+def write_receipt_allocations(tx, receipt, allocation_rows, fallback_type=None, previous=None):
     allocations = row_list(allocation_rows, tx.user, nonempty=False)
     types = set()
     for data in allocations:
+        if data.get('shipment_id'):
+            raise ApiError('收款只允许分摊到合同，不再指定具体发货记录')
         contract = owned(tx, 'contracts', data.get('contract_id'))
         if contract['customer_id'] != receipt['customer_id'] or contract['currency'] != receipt['currency']:
             raise ApiError('合同分摊必须属于收款客户和币种')
         payment_type = data.get('payment_type') or fallback_type or '其他'
         types.add(payment_type)
+        effective_date = receipt['payment_date']
+        if previous is not None:
+            old = next((p for p in previous['allocations'] if p['contract_id'] == contract['id']), None)
+            if old:
+                old_effective = old.get('allocation_effective_date') or old['payment_date']
+                effective_date = receipt['payment_date'] if old_effective == previous['payment_date'] else old_effective
+            else:
+                effective_date = china_today().isoformat()
         tx.add('payments', {
             **data, 'receipt_id': receipt['id'], 'currency': receipt['currency'],
+            'shipment_id': None, 'allocation_effective_date': effective_date,
             'payment_date': receipt['payment_date'], 'payment_type': payment_type,
             'exchange_rate': receipt.get('exchange_rate'), 'notes': receipt.get('notes'),
         })
@@ -60,7 +72,7 @@ def update_payment_receipt_with_allocations(tx, target_receipt_id, receipt_data,
     update(receipt, data)
     receipt['payment_date'] = receipt.get('payment_date') or date.today().isoformat()
     remove_children(tx, 'payments', 'receipt_id', receipt['id'])
-    write_receipt_allocations(tx, receipt, allocation_rows, data.get('payment_type'))
+    write_receipt_allocations(tx, receipt, allocation_rows, data.get('payment_type'), previous=before)
     receipt_history(tx, receipt, before, 'update', reason)
     return receipt['id']
 

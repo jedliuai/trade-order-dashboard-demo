@@ -1,10 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../services/dataStore';
 import { useCallback, useEffect } from 'react';
-import { checkPaymentTermsBeforeShipment } from '../services/businessRules';
 import { formatLocalDate } from '../services/dateUtils';
 import { getRemainingShipmentQuantity, isShipmentBatchWarehoused, normalizeShipmentQuantity } from '../services/shipmentAvailability';
-import { canExportReceiptConfirmation, matchesShipmentFilters, sortShipmentWorklist, summarizeShipmentDraft, summarizeShipmentSources } from '../services/shipmentWorkspace';
+import { buildShipmentPlanDisplayRows, calculateShipmentDraftVolumeLines, canExportReceiptConfirmation, matchesShipmentFilters, sortShipmentWorklist, summarizeShipmentDraft, summarizeShipmentDraftVolume, summarizeShipmentSources, type ShipmentPlanDetailMode } from '../services/shipmentWorkspace';
 import { getPhysicalShipmentRows, resolvePhysicalShipmentInvoice } from '../services/shipmentInvoicing';
 import { getFiscalYearRange, isDateInRange } from '../services/fiscalYear';
 import { Dialog } from '../components/Dialog';
@@ -20,8 +19,10 @@ import { DataTable } from '../components/DataTable';
 import { PaginationControls } from '../components/PaginationControls';
 import { usePagedRows } from '../hooks/usePagedRows';
 import { getBusinessStatusTone } from '../services/statusPresentation';
-import { calculateCurrentReceivables, summarizeShipmentSettlement } from '../services/receivablesWorkspace';
-import { Plus, Search, Eye, Edit2, Trash2, CheckCircle2, AlertCircle, X, FileSpreadsheet, FileText, Layers, RotateCcw, Truck, ReceiptText, PackageCheck, Eraser, Download } from 'lucide-react';
+import { calculateShipmentPaymentCoverage, summarizeShipmentPaymentCoverage } from '../services/receivablesWorkspace';
+import { loadPackagingVersions, type PackagingProfileVersion } from '../services/masterDataService';
+import { findMissingMaterialNumberSheets, summarizeMissingMaterialNumbers } from '../services/materialNumberRules';
+import { Plus, Search, Eye, Edit2, Trash2, X, FileSpreadsheet, FileText, Layers, RotateCcw, Truck, ReceiptText, PackageCheck, Eraser, Download, Boxes } from 'lucide-react';
 
 interface ShipmentsProps {
   onRefreshData: () => void;
@@ -67,12 +68,15 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   const [statusFilter, setStatusFilter] = useState('');
   const [invoiceFilter, setInvoiceFilter] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [showShipmentExportModal, setShowShipmentExportModal] = useState(false);
   const [selectedShipmentId, setSelectedShipmentId] = useState<string | null>(null);
-  const [editingShipmentId, setEditingShipmentId] = useState<string | null>(null);
+  const [shipmentExportSelectionId, setShipmentExportSelectionId] = useState<string | null>(null);
+  const [shipmentDetailMode, setShipmentDetailMode] = useState<ShipmentPlanDetailMode>('batch');
+  const [shipmentExportDetailMode, setShipmentExportDetailMode] = useState<ShipmentPlanDetailMode>('batch');
+  const [editingShipmentGroupId, setEditingShipmentGroupId] = useState<string | null>(null);
   const [invoiceShipmentId, setInvoiceShipmentId] = useState<string | null>(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [invoiceDate, setInvoiceDate] = useState(formatLocalDate());
@@ -95,14 +99,12 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   const [shipmentNo, setShipmentNo] = useState('');
   const [shipmentDate, setShipmentDate] = useState(formatLocalDate());
   const [notes, setNotes] = useState('');
-  const [editShipmentNo, setEditShipmentNo] = useState('');
-  const [editShipmentDate, setEditShipmentDate] = useState('');
-  const [editShipmentStatus, setEditShipmentStatus] = useState<'准备中' | '已发货' | '取消'>('已发货');
-  const [editShipmentNotes, setEditShipmentNotes] = useState('');
-  const [editShipmentAllocations, setEditShipmentAllocations] = useState<ShipmentAllocation[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [operationError, setOperationError] = useState('');
   const [showUnwarehousedSources, setShowUnwarehousedSources] = useState(false);
+  const [packagingVersions, setPackagingVersions] = useState<PackagingProfileVersion[]>([]);
+  const [packagingVersionsError, setPackagingVersionsError] = useState('');
+  const [isPackagingVersionsLoading, setIsPackagingVersionsLoading] = useState(true);
 
   // Selected contract info for shipment quantities allocation
   const [shipmentAllocations, setShipmentAllocations] = useState<ShipmentAllocation[]>([]);
@@ -123,23 +125,40 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   }, [onRefreshTrigger]);
 
   const { shipments, shipmentGroups, contracts, customers, contactSheets, payments, invoices, batches, allShipmentItems } = data;
+
+  useEffect(() => {
+    let active = true;
+    setIsPackagingVersionsLoading(true);
+    setPackagingVersionsError('');
+    void loadPackagingVersions()
+      .then((rows) => {
+        if (active) setPackagingVersions(rows);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setPackagingVersions([]);
+        setPackagingVersionsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (active) setIsPackagingVersionsLoading(false);
+      });
+    return () => { active = false; };
+  }, [onRefreshTrigger]);
+
   const reservingShipmentIds = useMemo(
     () => new Set(shipments.filter((shipment) => shipment.status !== '取消').map((shipment) => shipment.id)),
     [shipments]
   );
 
-  const currentReceivableFacts = useMemo(
-    () => calculateCurrentReceivables({
+  const shipmentPaymentCoverageFacts = useMemo(
+    () => calculateShipmentPaymentCoverage({
       contracts,
-      sheets: contactSheets,
       shipments,
       shipmentItems: allShipmentItems,
       payments,
-      asOfDate: formatLocalDate(),
-      // 发货列表只需要原币余额；这里不进行人民币汇总，因此无需查询汇率。
-      rateForDate: () => 1
-    }).facts,
-    [contracts, contactSheets, shipments, allShipmentItems, payments]
+      asOfDate: formatLocalDate()
+    }),
+    [contracts, shipments, allShipmentItems, payments]
   );
 
   const physicalShipments = useMemo(() => {
@@ -148,38 +167,21 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
       if (shipment.shipment_group_id && groupIds.has(shipment.shipment_group_id)) return [];
       if (shipment.shipment_group_id) groupIds.add(shipment.shipment_group_id);
       const children = getPhysicalShipmentRows(shipment, shipments);
-      const paymentStatuses = children.map((row) => row.payment_check_status);
-      const preShipmentStatus = paymentStatuses.includes('不建议发货') ? '不建议发货' : paymentStatuses.includes('需人工确认') ? '需人工确认' : '可发货';
-      const paymentCheckReason = Array.from(new Set(children.map((row) => row.contract_id))).map((contractId) => {
+      const settlement = summarizeShipmentPaymentCoverage(
+        children.map((row) => row.id),
+        shipmentPaymentCoverageFacts
+      );
+      const paymentCoverageReason = Array.from(new Set(children.map((row) => row.contract_id))).map((contractId) => {
         const contract = contracts.find((row) => row.id === contractId);
         if (!contract) return '';
-        const contractAmount = contactSheets
-          .filter((sheet) => sheet.contract_id === contractId)
-          .reduce((sum, sheet) => sum + sheet.quantity * sheet.unit_price, 0);
-        const contractPayments = payments.filter((payment) => payment.contract_id === contractId);
-        const totalPaid = contractPayments.reduce((sum, payment) => sum + payment.amount, 0);
-        const prepaymentAmount = contractPayments
-          .filter((payment) => payment.payment_type === '预付款')
-          .reduce((sum, payment) => sum + payment.amount, 0);
-        const proposedShipmentAmount = children
-          .filter((row) => row.contract_id === contractId)
-          .reduce((sum, row) => sum + row.amount, 0);
-        const check = checkPaymentTermsBeforeShipment(
-          contract.payment_terms,
-          contractAmount,
-          prepaymentAmount,
-          totalPaid,
-          proposedShipmentAmount
+        const contractCoverage = summarizeShipmentPaymentCoverage(
+          children.filter((row) => row.contract_id === contractId).map((row) => row.id),
+          shipmentPaymentCoverageFacts
         );
-        return `合同 ${contract.contract_no}：${check.message}`;
+        const symbol = contract.currency === 'USD' ? '$' : '￥';
+        return `合同 ${contract.contract_no}：本次发货 ${symbol}${contractCoverage.shipmentAmount.toLocaleString()}，已收覆盖 ${symbol}${contractCoverage.paidAmount.toLocaleString()}，未收 ${symbol}${contractCoverage.outstandingAmount.toLocaleString()}。`;
       }).filter(Boolean).join('\n');
       const amount = children.reduce((sum, row) => sum + row.amount, 0);
-      const hasActuallyShipped = children.some((row) => row.status === '已发货');
-      const settlement = summarizeShipmentSettlement(
-        children.map((row) => row.id),
-        amount,
-        currentReceivableFacts
-      );
       const group = shipment.shipment_group_id
         ? shipmentGroups.find((row) => row.id === shipment.shipment_group_id)
         : null;
@@ -205,18 +207,30 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         incoterm,
         freight_insurance_amount: freightInsuranceAmount,
         linked_paid_amount: linkedPaidAmount,
-        payment_check_status: preShipmentStatus,
-        payment_check_reason: paymentCheckReason,
-        payment_settlement_status: hasActuallyShipped ? settlement.status : preShipmentStatus,
-        payment_settlement_reason: hasActuallyShipped
-          ? `按合同内发货日期先发先抵：本次发货 ${shipment.currency === 'USD' ? '$' : '￥'}${amount.toLocaleString()}，已抵扣 ${shipment.currency === 'USD' ? '$' : '￥'}${settlement.paidAmount.toLocaleString()}，未收 ${shipment.currency === 'USD' ? '$' : '￥'}${settlement.outstandingAmount.toLocaleString()}。`
-          : paymentCheckReason,
+        payment_check_status: settlement.status,
+        payment_check_reason: paymentCoverageReason,
+        payment_settlement_status: settlement.status,
+        payment_settlement_reason: `合同级收款按发货日期先后抵扣。\n${paymentCoverageReason}`,
         sourceSummary,
         invoice_state: invoiceResolution.state,
         invoice: invoiceResolution.invoice
       }];
     });
-  }, [shipments, shipmentGroups, allShipmentItems, customers, invoices, contracts, contactSheets, payments, currentReceivableFacts]);
+  }, [shipments, shipmentGroups, allShipmentItems, customers, invoices, contracts, shipmentPaymentCoverageFacts]);
+
+  const missingMaterialsForContactSheetIds = useCallback((contactSheetIds: Iterable<string>) => (
+    findMissingMaterialNumberSheets(contactSheets, contactSheetIds)
+  ), [contactSheets]);
+
+  const missingMaterialsForPhysicalShipment = useCallback((shipmentId: string) => {
+    const representative = physicalShipments.find((shipment) => shipment.id === shipmentId);
+    if (!representative) return [];
+    const childIds = new Set(getPhysicalShipmentRows(representative, shipments).map((shipment) => shipment.id));
+    const contactSheetIds = allShipmentItems
+      .filter((item: any) => childIds.has(item.shipment_id))
+      .map((item: any) => String(item.contact_sheet_id || ''));
+    return missingMaterialsForContactSheetIds(contactSheetIds);
+  }, [allShipmentItems, missingMaterialsForContactSheetIds, physicalShipments, shipments]);
 
   // Filter physical shipment documents instead of showing one duplicate row per contract.
   const filteredShipments = useMemo(() => {
@@ -284,7 +298,17 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
     const children = shipment.shipment_group_id
       ? shipments.filter((row) => row.shipment_group_id === shipment.shipment_group_id)
       : [shipment];
-    const items = children.flatMap((row) => db.getShipmentDetails(row.id));
+    const items = children.flatMap((row) => db.getShipmentDetails(row.id).map((item) => ({
+      ...item,
+      contract_no: row.contract_no
+    })));
+    const volumeAllocations = items.map((item) => ({
+      contact_sheet_id: item.contact_sheet_id,
+      batch_id: item.batch_id || '',
+      availableQty: item.shipped_quantity,
+      shippedQty: item.shipped_quantity
+    }));
+    const volumeLines = calculateShipmentDraftVolumeLines(volumeAllocations, contactSheets, packagingVersions);
     return {
       shipment: {
         ...shipment,
@@ -292,12 +316,23 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         contract_no: Array.from(new Set(children.map((row) => row.contract_no))).join('、'),
         amount: children.reduce((sum, row) => sum + row.amount, 0)
       },
-      items
+      items: items.map((item, index) => ({ ...item, volume: volumeLines[index] })),
+      volumeSummary: summarizeShipmentDraftVolume(volumeAllocations, contactSheets, packagingVersions)
     };
-  }, [selectedShipmentId, shipments, onRefreshTrigger]);
+  }, [selectedShipmentId, shipments, onRefreshTrigger, contactSheets, packagingVersions]);
+
+  const selectedShipmentDisplayRows = useMemo(() => selectedShipmentDetails
+    ? buildShipmentPlanDisplayRows(selectedShipmentDetails.items, shipmentDetailMode)
+    : [], [selectedShipmentDetails, shipmentDetailMode]);
+
+  const shipmentExportSelection = useMemo(
+    () => physicalShipments.find((shipment) => shipment.id === shipmentExportSelectionId) || null,
+    [physicalShipments, shipmentExportSelectionId]
+  );
 
   const handleOpenAdd = () => {
     const today = formatLocalDate();
+    setEditingShipmentGroupId(null);
     setCustomerId('');
     setShipmentNo(nextShipmentNumber([
       ...shipments.map((shipment) => shipment.group_shipment_no || shipment.shipment_no),
@@ -311,37 +346,46 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
     setShowAddModal(true);
   };
 
-  const handleSelectCustomer = useCallback((nextCustomerId: string, fullContractId = '') => {
-    setCustomerId(nextCustomerId);
-    setShowUnwarehousedSources(false);
+  const buildShipmentAllocations = useCallback((
+    nextCustomerId: string,
+    options: {
+      fullContractId?: string;
+      excludedShipmentIds?: Set<string>;
+      currentItems?: any[];
+      requiredIncoterm?: 'FOB' | 'CIF' | null;
+    } = {}
+  ) => {
+    const excludedShipmentIds = options.excludedShipmentIds || new Set<string>();
+    const currentItems = options.currentItems || [];
     const customerContractIds = new Set(contracts.filter((contract) => contract.customer_id === nextCustomerId).map((contract) => contract.id));
     const sheetsList = contactSheets.filter((sheet) => customerContractIds.has(sheet.contract_id));
-
-    // Find batches under these sheets
     const allocationsList: typeof shipmentAllocations = [];
 
     sheetsList.forEach(sheet => {
+      const contract = contracts.find((row) => row.id === sheet.contract_id);
+      if (!contract || (options.requiredIncoterm !== undefined && (contract.incoterm || null) !== options.requiredIncoterm)) return;
       const sheetBatches = batches.filter(b => b.contact_sheet_id === sheet.id);
 
-      if (sheet.business_type === '原料药') {
+      if (sheet.business_type === '原料药' || sheet.is_historical) {
+        const current = currentItems.find((item: any) => item.contact_sheet_id === sheet.id && !item.batch_id);
         const alreadyShipped = allShipmentItems
-          .filter((item: any) => item.contact_sheet_id === sheet.id && reservingShipmentIds.has(item.shipment_id))
+          .filter((item: any) => item.contact_sheet_id === sheet.id && !excludedShipmentIds.has(item.shipment_id) && reservingShipmentIds.has(item.shipment_id))
           .reduce((sum: number, item: any) => sum + item.shipped_quantity, 0);
         const available = normalizeShipmentQuantity(sheet.quantity - alreadyShipped);
-        if (available > 0) {
+        if (available > 0 || current) {
           allocationsList.push({
             contact_sheet_id: sheet.id,
             batch_id: '',
             material_no: sheet.material_no,
             product_name: sheet.product_name,
-            batch_no: '原料药无需批号',
+            batch_no: sheet.is_historical ? '历史数据未记录批次' : '原料药无需批号',
             availableQty: available,
-            shippedQty: sheet.contract_id === fullContractId ? available : 0,
-            unitPrice: sheet.unit_price,
+            shippedQty: current ? Number(current.shipped_quantity || 0) : sheet.contract_id === options.fullContractId ? available : 0,
+            unitPrice: Number(current?.unit_price || sheet.unit_price),
             contact_sheet_no: sheet.contact_sheet_no,
-            contract_no: contracts.find((contract) => contract.id === sheet.contract_id)?.contract_no || '',
+            contract_no: contract.contract_no,
             contract_id: sheet.contract_id,
-            incoterm: contracts.find((contract) => contract.id === sheet.contract_id)?.incoterm || null,
+            incoterm: contract.incoterm || null,
             isWarehoused: true
           });
         }
@@ -349,9 +393,9 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
       }
 
       sheetBatches.forEach(batch => {
-        // Calculate shipped quantity for this batch in other shipments
+        const current = currentItems.find((item: any) => item.batch_id === batch.id);
         const alreadyShipped = allShipmentItems
-          .filter((item: any) => item.batch_id === batch.id && reservingShipmentIds.has(item.shipment_id))
+          .filter((item: any) => item.batch_id === batch.id && !excludedShipmentIds.has(item.shipment_id) && reservingShipmentIds.has(item.shipment_id))
           .reduce((sum: number, item: any) => sum + item.shipped_quantity, 0);
 
         const availability = {
@@ -360,7 +404,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         };
         const isWarehoused = isShipmentBatchWarehoused(availability);
         const available = getRemainingShipmentQuantity(batch.batch_quantity, alreadyShipped);
-        if (available <= 0) return;
+        if (available <= 0 && !current) return;
 
         allocationsList.push({
           contact_sheet_id: sheet.id,
@@ -369,19 +413,26 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
           product_name: sheet.product_name,
           batch_no: batch.batch_no,
           availableQty: available,
-          shippedQty: isWarehoused && sheet.contract_id === fullContractId ? available : 0,
-          unitPrice: sheet.unit_price,
+          shippedQty: current ? Number(current.shipped_quantity || 0) : isWarehoused && sheet.contract_id === options.fullContractId ? available : 0,
+          unitPrice: Number(current?.unit_price || sheet.unit_price),
           contact_sheet_no: sheet.contact_sheet_no,
-          contract_no: contracts.find((contract) => contract.id === sheet.contract_id)?.contract_no || '',
+          contract_no: contract.contract_no,
           contract_id: sheet.contract_id,
-          incoterm: contracts.find((contract) => contract.id === sheet.contract_id)?.incoterm || null,
+          incoterm: contract.incoterm || null,
           isWarehoused
         });
       });
     });
 
-    setShipmentAllocations(allocationsList);
+    return allocationsList;
   }, [allShipmentItems, batches, contactSheets, contracts, reservingShipmentIds]);
+
+  const handleSelectCustomer = useCallback((nextCustomerId: string, fullContractId = '') => {
+    setCustomerId(nextCustomerId);
+    setShowUnwarehousedSources(false);
+    const allocationsList = buildShipmentAllocations(nextCustomerId, { fullContractId });
+    setShipmentAllocations(allocationsList);
+  }, [buildShipmentAllocations]);
 
   useEffect(() => {
     const quickContractId = sessionStorage.getItem('quick_shipment_contract_id');
@@ -393,6 +444,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
       return;
     }
     const today = formatLocalDate();
+    setEditingShipmentGroupId(null);
     setCustomerId(targetContract.customer_id);
     setShipmentNo(nextShipmentNumber([
       ...shipments.map((shipment) => shipment.group_shipment_no || shipment.shipment_no),
@@ -404,20 +456,6 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
     handleSelectCustomer(targetContract.customer_id, targetContract.id);
     setShowAddModal(true);
   }, [onRefreshTrigger, contracts, notify, shipmentGroups, shipments, handleSelectCustomer]);
-
-  const paymentCheckResults = useMemo(() => {
-    const usedContractIds = new Set(shipmentAllocations.filter((row) => row.shippedQty > 0).map((row) => contactSheets.find((sheet) => sheet.id === row.contact_sheet_id)?.contract_id).filter(Boolean));
-    return Array.from(usedContractIds).map((contractId) => {
-      const contract = contracts.find((row) => row.id === contractId);
-      if (!contract) return null;
-      const contractAmount = contactSheets.filter((sheet) => sheet.contract_id === contract.id).reduce((sum, sheet) => sum + sheet.quantity * sheet.unit_price, 0);
-      const contractPayments = payments.filter((payment) => payment.contract_id === contract.id);
-      const totalPaid = contractPayments.reduce((sum, payment) => sum + payment.amount, 0);
-      const prepaymentVal = contractPayments.filter((payment) => payment.payment_type === '预付款').reduce((sum, payment) => sum + payment.amount, 0);
-      const proposedShipmentAmt = shipmentAllocations.filter((row) => contactSheets.find((sheet) => sheet.id === row.contact_sheet_id)?.contract_id === contract.id).reduce((sum, row) => sum + row.shippedQty * row.unitPrice, 0);
-      return { contract, totalPaid, contractAmount, proposedShipmentAmt, check: checkPaymentTermsBeforeShipment(contract.payment_terms, contractAmount, prepaymentVal, totalPaid, proposedShipmentAmt) };
-    }).filter((row): row is NonNullable<typeof row> => Boolean(row));
-  }, [shipmentAllocations, contracts, contactSheets, payments]);
 
   const visibleShipmentAllocations = useMemo(
     () => showUnwarehousedSources
@@ -432,6 +470,10 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   const shipmentDraftSummary = useMemo(
     () => summarizeShipmentDraft(visibleShipmentAllocations),
     [visibleShipmentAllocations]
+  );
+  const shipmentDraftVolume = useMemo(
+    () => summarizeShipmentDraftVolume(visibleShipmentAllocations, contactSheets, packagingVersions),
+    [visibleShipmentAllocations, contactSheets, packagingVersions]
   );
   const selectedShipmentIncoterm = useMemo(
     () => shipmentAllocations.find((row) => row.shippedQty > 0)?.incoterm || null,
@@ -493,12 +535,6 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
     });
   };
 
-  const handleEditQtyChange = (idx: number, val: number) => {
-    const copy = [...editShipmentAllocations];
-    copy[idx].shippedQty = normalizeShipmentQuantity(Math.min(copy[idx].availableQty, Math.max(0, val)));
-    setEditShipmentAllocations(copy);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customers.some((customer) => customer.id === customerId) || !shipmentNo.trim()) return;
@@ -517,25 +553,49 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
       notify({ title: '没有可保存的发货数量', message: '请在分摊列表中为至少一个批次或原料药明细填写大于 0 的发货数量。', tone: 'warning' });
       return;
     }
+    const missingMaterialSheets = missingMaterialsForContactSheetIds(
+      itemsToShip.map((item) => item.contact_sheet_id)
+    );
 
     setIsSaving(true);
     setOperationError('');
     try {
-      const groupId = await db.addShipmentGroup({
-        shipment_no: shipmentNo,
-        customer_id: customerId,
-        shipment_date: shipmentDate,
-        status: '准备中',
-        notes
-      }, itemsToShip);
+      const groupId = editingShipmentGroupId
+        ? await db.updatePreparingShipmentGroup(editingShipmentGroupId, {
+            shipment_no: shipmentNo,
+            shipment_date: shipmentDate,
+            notes
+          }, itemsToShip)
+        : await db.addShipmentGroup({
+            shipment_no: shipmentNo,
+            customer_id: customerId,
+            shipment_date: shipmentDate,
+            status: '准备中',
+            notes
+          }, itemsToShip);
       setShowAddModal(false);
       onRefreshData();
+      if (missingMaterialSheets.length > 0) {
+        notify({
+          title: editingShipmentGroupId ? '安排已更新，物料号待补' : '发货安排已保存，物料号待补',
+          message: `${summarizeMissingMaterialNumbers(missingMaterialSheets)} 尚未填写物料号。安排已保留，但正式发货安排文件需要补齐后再导出。`,
+          tone: 'warning',
+          duration: 9000
+        });
+        return;
+      }
       try {
-        await db.runLocalExport('export-shipment-plan', { shipment_group_id: groupId });
-        notify({ title: '发货安排已创建', message: '库存已占用，发货安排 Excel 已自动下载；实际发货后请回来确认真实日期和数量。', tone: 'success' });
+        await db.runWorkerExport('export-shipment-plan', { shipment_group_id: groupId, detail_mode: 'batch' });
+        notify({
+          title: editingShipmentGroupId ? '发货安排已更新' : '发货安排已创建',
+          message: editingShipmentGroupId
+            ? '产品、批次和数量已重新占用，最新版发货安排 Excel 已自动下载。'
+            : '库存已占用，发货安排 Excel 已自动下载；实际发货后请回来确认真实日期和数量。',
+          tone: 'success'
+        });
       } catch (exportError) {
         notify({
-          title: '发货安排已保存，但 Excel 未下载',
+          title: editingShipmentGroupId ? '安排已更新，但 Excel 未下载' : '发货安排已保存，但 Excel 未下载',
           message: `${exportError instanceof Error ? exportError.message : String(exportError)} 可在列表中点击“导出安排”重试。`,
           tone: 'warning',
           duration: 8000
@@ -582,18 +642,34 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
     }
   };
 
-  const handleExportShipmentPlan = async (id: string) => {
+  const handleExportShipmentPlan = async (id: string, detailMode: ShipmentPlanDetailMode) => {
     const shipment = physicalShipments.find((row) => row.id === id);
     if (!shipment?.shipment_group_id) {
       notify({ title: '无法导出安排', message: '这是一条旧版单合同发货记录，没有整笔发货安排编号。', tone: 'warning' });
       return;
     }
+    const missingMaterialSheets = missingMaterialsForPhysicalShipment(id);
+    if (missingMaterialSheets.length > 0) {
+      notify({
+        title: '请先补齐物料号',
+        message: `以下联系单尚未填写物料号，不能导出正式发货文件：${summarizeMissingMaterialNumbers(missingMaterialSheets)}。`,
+        tone: 'warning',
+        duration: 8000
+      });
+      return;
+    }
+    const exportLabel = shipment.status === '准备中' ? '发货安排' : '实际发货清单';
     setExportingShipmentId(id);
     try {
-      await db.runLocalExport('export-shipment-plan', { shipment_group_id: shipment.shipment_group_id });
-      notify({ title: '发货安排已导出', message: `${shipment.shipment_no} 的 Excel 已下载。`, tone: 'success' });
+      await db.runWorkerExport('export-shipment-plan', {
+        shipment_group_id: shipment.shipment_group_id,
+        detail_mode: detailMode
+      });
+      setShowShipmentExportModal(false);
+      setShipmentExportSelectionId(null);
+      notify({ title: `${exportLabel}已导出`, message: `${shipment.shipment_no} 的 Excel 已下载。`, tone: 'success' });
     } catch (error) {
-      notify({ title: '发货安排导出失败', message: error instanceof Error ? error.message : String(error), tone: 'error' });
+      notify({ title: `${exportLabel}导出失败`, message: error instanceof Error ? error.message : String(error), tone: 'error' });
     } finally {
       setExportingShipmentId(null);
     }
@@ -609,9 +685,19 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
       });
       return;
     }
+    const missingMaterialSheets = missingMaterialsForPhysicalShipment(id);
+    if (missingMaterialSheets.length > 0) {
+      notify({
+        title: '请先补齐物料号',
+        message: `以下联系单尚未填写物料号，不能生成收货确认函：${summarizeMissingMaterialNumbers(missingMaterialSheets)}。`,
+        tone: 'warning',
+        duration: 8000
+      });
+      return;
+    }
     setExportingReceiptConfirmationId(id);
     try {
-      await db.runLocalExport('export-receipt-confirmation', { shipment_id: id });
+      await db.runWorkerExport('export-receipt-confirmation', { shipment_id: id });
       notify({
         title: '收货确认函已导出',
         message: `${shipment.shipment_no} 对应的 Word 文档已下载。`,
@@ -632,37 +718,17 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   const handleOpenDispatch = (id: string) => {
     const target = physicalShipments.find((row) => row.id === id);
     if (!target?.shipment_group_id || target.status !== '准备中') return;
+    const group = shipmentGroups.find((row) => row.id === target.shipment_group_id);
+    if (!group) return;
     const groupChildIds = new Set(
       shipments.filter((row) => row.shipment_group_id === target.shipment_group_id).map((row) => row.id)
     );
     const currentItems = allShipmentItems.filter((item: any) => groupChildIds.has(item.shipment_id));
-    const allocations = currentItems.map((item: any) => {
-      const sheet = contactSheets.find((row) => row.id === item.contact_sheet_id);
-      const batch = batches.find((row) => row.id === item.batch_id);
-      const reservedByOtherForSheet = allShipmentItems
-        .filter((row: any) => row.contact_sheet_id === item.contact_sheet_id && !groupChildIds.has(row.shipment_id) && reservingShipmentIds.has(row.shipment_id))
-        .reduce((sum: number, row: any) => sum + Number(row.shipped_quantity || 0), 0);
-      const sheetAvailable = Math.max(0, Number(sheet?.quantity || 0) - reservedByOtherForSheet);
-      const reservedByOtherForBatch = item.batch_id
-        ? allShipmentItems
-            .filter((row: any) => row.batch_id === item.batch_id && !groupChildIds.has(row.shipment_id) && reservingShipmentIds.has(row.shipment_id))
-            .reduce((sum: number, row: any) => sum + Number(row.shipped_quantity || 0), 0)
-        : 0;
-      const batchAvailable = item.batch_id ? Math.max(0, Number(batch?.batch_quantity || 0) - reservedByOtherForBatch) : sheetAvailable;
-      const availableQty = normalizeShipmentQuantity(Math.min(sheetAvailable, batchAvailable));
-      return {
-        contact_sheet_id: item.contact_sheet_id,
-        batch_id: item.batch_id || '',
-        material_no: item.material_no || sheet?.material_no || '',
-        product_name: sheet?.product_name || item.product_name || '',
-        batch_no: batch?.batch_no || (sheet?.business_type === '原料药' ? '原料药无需批号' : '历史数据未记录批次'),
-        availableQty,
-        shippedQty: normalizeShipmentQuantity(Number(item.shipped_quantity || 0)),
-        unitPrice: Number(item.unit_price || sheet?.unit_price || 0),
-        contact_sheet_no: sheet?.contact_sheet_no || '',
-        contract_no: shipments.find((row) => row.id === item.shipment_id)?.contract_no || ''
-      };
-    });
+    const allocations = buildShipmentAllocations(group.customer_id, {
+      excludedShipmentIds: groupChildIds,
+      currentItems,
+      requiredIncoterm: group.incoterm || null
+    }).filter((row) => row.shippedQty > 0);
     setDispatchShipmentId(id);
     setDispatchDate(formatLocalDate());
     setDispatchNotes(target.notes || '');
@@ -684,6 +750,11 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
       }));
     if (!items.length) {
       setDispatchError('实际发货至少保留一条数量大于 0 的明细。');
+      return;
+    }
+    const missingMaterialSheets = missingMaterialsForContactSheetIds(items.map((item) => item.contact_sheet_id));
+    if (missingMaterialSheets.length > 0) {
+      setDispatchError(`以下联系单尚未填写物料号，不能确认实际发货：${summarizeMissingMaterialNumbers(missingMaterialSheets)}。请先返回联系单补录。`);
       return;
     }
     const unwarehousedItems = dispatchAllocations.filter((row) => {
@@ -841,114 +912,106 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   };
 
   const handleOpenEdit = (id: string) => {
-    const shipment = shipments.find(s => s.id === id);
-    if (!shipment) return;
-    if (shipment.shipment_group_id) {
+    const shipment = physicalShipments.find((row) => row.id === id);
+    if (!shipment?.shipment_group_id || shipment.status !== '准备中') {
       notify({
-        title: '合并发货暂不支持直接编辑',
-        message: '这笔发货涉及多个合同。为避免只修改部分明细导致账实不符，请删除整笔后重新登记。',
+        title: '发货事实已经锁定',
+        message: shipment?.status === '已发货'
+          ? '已确认实际发货后不能再修改产品、批次、数量或日期；如需更正，请使用“作废并复制”。'
+          : '旧版记录不支持整组编辑，请先核对记录状态。',
         tone: 'warning',
         duration: 7000
       });
       return;
     }
-    setEditingShipmentId(id);
-    setEditShipmentNo(shipment.shipment_no);
-    setEditShipmentDate(shipment.shipment_date);
-    setEditShipmentStatus(shipment.status);
-    setEditShipmentNotes(shipment.notes || '');
-    const sheetsList = contactSheets.filter(s => s.contract_id === shipment.contract_id);
-    const currentItems = allShipmentItems.filter((item: any) => item.shipment_id === id);
-    const allocationsList: ShipmentAllocation[] = [];
-    sheetsList.forEach(sheet => {
-      const sheetBatches = batches.filter(b => b.contact_sheet_id === sheet.id);
-      if (sheet.business_type === '原料药' || sheet.is_historical) {
-        const current = currentItems.find((item: any) => item.contact_sheet_id === sheet.id && !item.batch_id);
-        const shippedByOther = allShipmentItems
-          .filter((item: any) => item.contact_sheet_id === sheet.id && item.shipment_id !== id && reservingShipmentIds.has(item.shipment_id))
-          .reduce((sum: number, item: any) => sum + item.shipped_quantity, 0);
-        const available = normalizeShipmentQuantity(sheet.quantity - shippedByOther);
-        if (available > 0 || current) {
-          allocationsList.push({
-            contact_sheet_id: sheet.id,
-            batch_id: '',
-            material_no: sheet.material_no,
-            product_name: sheet.product_name,
-            batch_no: sheet.is_historical ? '历史数据未记录批次' : '原料药无需批号',
-            availableQty: available,
-            shippedQty: Number(current?.shipped_quantity || 0),
-            unitPrice: Number(current?.unit_price || sheet.unit_price),
-            contact_sheet_no: sheet.contact_sheet_no,
-            contract_no: shipment.contract_no
-          });
-        }
-        return;
-      }
-      sheetBatches.forEach(batch => {
-        const current = currentItems.find((item: any) => item.batch_id === batch.id);
-        const shippedByOther = allShipmentItems
-          .filter((item: any) => item.batch_id === batch.id && item.shipment_id !== id && reservingShipmentIds.has(item.shipment_id))
-          .reduce((sum: number, item: any) => sum + item.shipped_quantity, 0);
-        const available = normalizeShipmentQuantity(batch.batch_quantity - shippedByOther);
-        allocationsList.push({
-          contact_sheet_id: sheet.id,
-          batch_id: batch.id,
-          material_no: sheet.material_no,
-          product_name: sheet.product_name,
-          batch_no: batch.batch_no,
-          availableQty: available,
-          shippedQty: current?.shipped_quantity || 0,
-          unitPrice: current?.unit_price || sheet.unit_price,
-          contact_sheet_no: sheet.contact_sheet_no,
-          contract_no: shipment.contract_no
-        });
-      });
+    const group = shipmentGroups.find((row) => row.id === shipment.shipment_group_id);
+    if (!group) return;
+    const childIds = new Set(shipments.filter((row) => row.shipment_group_id === group.id).map((row) => row.id));
+    const currentItems = allShipmentItems.filter((item: any) => childIds.has(item.shipment_id));
+    const allocations = buildShipmentAllocations(group.customer_id, {
+      excludedShipmentIds: childIds,
+      currentItems,
+      requiredIncoterm: group.incoterm || null
     });
-    setEditShipmentAllocations(allocationsList);
+    setEditingShipmentGroupId(group.id);
+    setCustomerId(group.customer_id);
+    setShipmentNo(group.shipment_no);
+    setShipmentDate(group.shipment_date);
+    setNotes(group.notes || '');
+    setShipmentAllocations(allocations);
+    setShowUnwarehousedSources(allocations.some((row) => row.isWarehoused === false && row.shippedQty > 0));
     setOperationError('');
-    setShowEditModal(true);
+    setShowAddModal(true);
   };
 
-  const handleSubmitEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingShipmentId || !editShipmentNo.trim()) return;
-    const itemsToSave = editShipmentAllocations
-      .filter(item => item.shippedQty > 0)
-      .map(item => ({
-        contact_sheet_id: item.contact_sheet_id,
-        batch_id: item.batch_id,
-        shipped_quantity: item.shippedQty,
-        unit_price: item.unitPrice
-      }));
-    if (itemsToSave.length === 0) {
-      notify({ title: '至少保留一条发货明细', message: '如果要撤销整张发货单，请关闭编辑窗口并使用删除按钮。', tone: 'warning' });
+  const handleVoidAndCopy = async (id: string) => {
+    const shipment = physicalShipments.find((row) => row.id === id);
+    if (!shipment?.shipment_group_id || shipment.status !== '已发货') return;
+    if (shipment.invoice_state === 'invoiced' || shipment.invoice_state === 'inconsistent') {
+      notify({
+        title: '请先处理开票记录',
+        message: shipment.invoice_state === 'invoiced'
+          ? '这笔发货已经开票，请先撤销开票，再作废并复制。'
+          : '这笔发货的开票关联存在异常，需要先人工核对。',
+        tone: 'warning'
+      });
       return;
     }
-    setIsSaving(true);
-    setOperationError('');
+    const today = formatLocalDate();
+    const replacementNo = nextShipmentNumber([
+      ...shipments.map((row) => row.group_shipment_no || row.shipment_no),
+      ...shipmentGroups.map((group) => group.shipment_no)
+    ], today);
+    const approved = await confirm({
+      title: '作废并复制为新安排？',
+      message: `原发货单：${shipment.shipment_no}\n原记录会保留为“取消”，不再占用库存或参与财务统计；系统将复制为新的准备中安排 ${replacementNo}，供你重新调整。`,
+      confirmLabel: '作废并复制',
+      tone: 'danger'
+    });
+    if (!approved) return;
     try {
-      await db.updateShipmentWithItems(editingShipmentId, {
-        shipment_no: editShipmentNo.trim(),
-        shipment_date: editShipmentDate,
-        status: editShipmentStatus,
-        notes: editShipmentNotes
-      }, itemsToSave);
-      setShowEditModal(false);
-      setEditingShipmentId(null);
+      await db.voidAndCopyShipmentGroup(shipment.shipment_group_id, replacementNo, today);
       onRefreshData();
+      notify({ title: '已作废并复制', message: `原发货事实已保留，新安排 ${replacementNo} 已创建并置顶。`, tone: 'success' });
     } catch (error) {
-      setOperationError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsSaving(false);
+      notify({ title: '作废复制失败', message: error instanceof Error ? error.message : String(error), tone: 'error', duration: 8000 });
     }
   };
 
   const handleOpenDetails = (id: string) => {
     setSelectedShipmentId(id);
+    setShipmentDetailMode('batch');
     setShowDetailModal(true);
   };
 
+  const handleOpenShipmentExport = (id: string) => {
+    setShipmentExportSelectionId(id);
+    setShipmentExportDetailMode('batch');
+    setShowShipmentExportModal(true);
+  };
+
   const handleExportExcel = () => {
+    const filteredChildShipmentIds = new Set(
+      filteredShipments.flatMap((shipment) => (
+        shipment.shipment_group_id
+          ? shipments.filter((row) => row.shipment_group_id === shipment.shipment_group_id).map((row) => row.id)
+          : [shipment.id]
+      ))
+    );
+    const missingMaterialSheets = missingMaterialsForContactSheetIds(
+      allShipmentItems
+        .filter((item: any) => filteredChildShipmentIds.has(item.shipment_id))
+        .map((item: any) => item.contact_sheet_id)
+    );
+    if (missingMaterialSheets.length > 0) {
+      notify({
+        title: '请先补齐物料号',
+        message: `当前筛选结果包含尚未填写物料号的联系单，不能导出发货明细：${summarizeMissingMaterialNumbers(missingMaterialSheets)}。`,
+        tone: 'warning',
+        duration: 8000
+      });
+      return;
+    }
     const headers = [
       '发货编号', '发货日期', '关联合同', '客户名称', '联系单号',
       '产品名称', '物料编号', '生产批号', '发货数量', '单位',
@@ -985,8 +1048,8 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
           batch?.batch_no || '',
           shippedQty.toString(),
           sheet?.unit || '支',
-          batch?.production_date || sheet?.production_date || '',
-          batch?.expiry_date || sheet?.expiry_date || '',
+          sheet?.production_date || '',
+          sheet?.expiry_date || '',
           sheet?.packaging || '',
           pcsPerCarton ? pcsPerCarton.toString() : '-',
           cartons,
@@ -1007,6 +1070,71 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
     link.click();
     document.body.removeChild(link);
   };
+
+  const renderShipmentActions = (shipment: (typeof shipmentPage.rows)[number], compact = false) => (
+    <div className={compact ? 'flex flex-wrap justify-start gap-2' : 'flex min-w-max justify-end gap-1.5 whitespace-nowrap'}>
+      {shipment.status === '准备中' && shipment.shipment_group_id && (
+        <Button
+          onClick={() => handleOpenEdit(shipment.id)}
+          tone="secondary"
+          size="sm"
+          icon={<Edit2 className="h-3.5 w-3.5" />}
+        >
+          编辑安排
+        </Button>
+      )}
+      {shipment.shipment_group_id && shipment.status !== '取消' && (
+        <Button
+          onClick={() => handleOpenShipmentExport(shipment.id)}
+          tone="secondary"
+          size="sm"
+          disabled={exportingShipmentId === shipment.id}
+          icon={<Download className="h-3.5 w-3.5" />}
+        >
+          {exportingShipmentId === shipment.id
+            ? '导出中…'
+            : shipment.status === '准备中' ? '导出安排' : '实际发货清单'}
+        </Button>
+      )}
+      {shipment.status === '准备中' && shipment.shipment_group_id && (
+        <Button
+          onClick={() => handleOpenDispatch(shipment.id)}
+          size="sm"
+          icon={<Truck className="h-3.5 w-3.5" />}
+        >
+          确认实际发货
+        </Button>
+      )}
+      {(shipment.invoice_state === 'pending' || shipment.invoice_state === 'invoiced') && (
+        <Button
+          onClick={() => handleOpenInvoice(shipment.id)}
+          tone={shipment.invoice_state === 'invoiced' ? 'secondary' : 'subtle'}
+          size="sm"
+          icon={<ReceiptText className="h-3.5 w-3.5" />}
+        >
+          {shipment.invoice_state === 'invoiced' ? '修改开票' : '确认开票'}
+        </Button>
+      )}
+      {canExportReceiptConfirmation(shipment) && (
+        <Button
+          onClick={() => void handleExportReceiptConfirmation(shipment.id)}
+          tone="secondary"
+          size="sm"
+          disabled={exportingReceiptConfirmationId === shipment.id}
+          icon={<FileText className="h-3.5 w-3.5" />}
+        >
+          {exportingReceiptConfirmationId === shipment.id ? '生成中…' : '收货确认函'}
+        </Button>
+      )}
+      {shipment.status === '已发货' && (
+        <IconButton onClick={() => void handleVoidAndCopy(shipment.id)} label="作废并复制为新安排" tone="danger" icon={<RotateCcw className="h-3.5 w-3.5" />} />
+      )}
+      <IconButton onClick={() => handleOpenDetails(shipment.id)} label="核对发货明细" icon={<Eye className="h-3.5 w-3.5" />} />
+      {shipment.status === '准备中' && shipment.shipment_group_id && (
+        <IconButton onClick={() => handleDelete(shipment.id)} label="删除发货安排" tone="danger" icon={<Trash2 className="h-3.5 w-3.5" />} />
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -1111,7 +1239,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         <div className="flex items-center justify-between gap-3 border-t border-border pt-3 md:col-span-2 xl:col-span-8">
           <span className="text-[11px] text-muted">
             显示 {filteredShipments.length} / {periodView === 'fiscal' ? shipmentPeriodCounts.fiscal : shipmentPeriodCounts.history} 笔{periodView === 'fiscal' ? '本财年' : '历史'}发货业务
-            <span className="ml-2 text-brand-gold">待开票优先 · 同状态按发货日期由晚到早</span>
+            <span className="ml-2 text-brand-amber">待开票优先 · 同状态按发货日期由晚到早</span>
           </span>
           {hasActiveFilters && (
             <Button onClick={clearFilters} tone="secondary" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />}>恢复本财年默认范围</Button>
@@ -1119,17 +1247,73 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         </div>
       </FilterPanel>
 
-      {/* Shipment Records table */}
-      <DataTable ariaLabel="发货与开票记录" className="glass-panel text-xs">
+      {/* Shipment Records: narrow-screen summary and unchanged desktop table */}
+      <div className="space-y-3 lg:hidden" aria-label="发货与开票记录窄屏摘要">
+        {shipmentPage.rows.length > 0 ? shipmentPage.rows.map((shipment) => {
+          const invoiceLabel = shipment.invoice_state === 'invoiced'
+            ? '已开票'
+            : shipment.invoice_state === 'inconsistent'
+              ? '需要检查'
+              : shipment.invoice_state === 'not-shipped'
+                ? '发货后开票'
+                : '待开票';
+
+          return (
+            <article key={shipment.id} className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="truncate font-heading text-sm font-bold text-ink">{shipment.shipment_no}</h3>
+                  <div className="mt-1 text-[11px] text-muted">{shipment.shipment_date} · {shipment.customer_name}</div>
+                </div>
+                <StatusBadge tone={getBusinessStatusTone(shipment.status)} dot>{shipment.status}</StatusBadge>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-surface-muted/45 p-3 text-xs">
+                <div>
+                  <div className="text-[10px] font-semibold text-subtle">发货金额</div>
+                  <div className="mt-1 font-bold text-ink">{shipment.currency === 'USD' ? '$' : '￥'}{(shipment.amount || 0).toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold text-subtle">开票 / 回款</div>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <StatusBadge tone={getBusinessStatusTone(invoiceLabel)}>{invoiceLabel}</StatusBadge>
+                    <span
+                      className={shipment.payment_settlement_reason ? 'cursor-help' : undefined}
+                      title={shipment.payment_settlement_reason || undefined}
+                      aria-label={shipment.payment_settlement_reason ? `${shipment.payment_settlement_status}：${shipment.payment_settlement_reason}` : shipment.payment_settlement_status}
+                    >
+                      <StatusBadge tone={getBusinessStatusTone(shipment.payment_settlement_status)}>{shipment.payment_settlement_status}</StatusBadge>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {shipment.sourceSummary.contractNos.slice(0, 2).map((contractNo) => (
+                  <span key={contractNo} className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] font-semibold text-body">{contractNo}</span>
+                ))}
+                {shipment.sourceSummary.contractNos.length > 2 && <span className="text-[10px] font-semibold text-muted">+{shipment.sourceSummary.contractNos.length - 2} 合同</span>}
+                <span className="text-[10px] text-muted">{shipment.sourceSummary.contactSheetNos.length} 个联系单 · {shipment.sourceSummary.batchNos.length} 个批次</span>
+              </div>
+
+              <div className="mt-3 border-t border-border pt-3">{renderShipmentActions(shipment, true)}</div>
+            </article>
+          );
+        }) : (
+          <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted">没有匹配的发货记录，请调整筛选条件。</div>
+        )}
+      </div>
+      <div className="hidden lg:block">
+        <DataTable ariaLabel="发货与开票记录" className="glass-panel text-xs" tableClassName="min-w-[1200px]">
             <thead>
               <tr className="select-none border-b border-border bg-surface-muted/70 font-semibold text-muted">
-                <th className="p-4">发货单</th>
-                <th className="p-4">客户</th>
+                <th className="min-w-[150px] p-4">发货单</th>
+                <th className="min-w-[130px] p-4">客户</th>
                 <th className="p-4">来源范围</th>
-                <th className="p-4">状态</th>
-                <th className="p-4">开票</th>
-                <th className="p-4">发货金额</th>
-                <th className="p-4 text-right">操作</th>
+                <th className="min-w-[110px] p-4">状态</th>
+                <th className="min-w-[105px] p-4">开票</th>
+                <th className="min-w-[115px] whitespace-nowrap p-4">发货金额</th>
+                <th className="min-w-[385px] whitespace-nowrap px-3 py-4 text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -1150,7 +1334,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                         <div className="mt-1 text-[10px] text-muted">{s.shipment_date}</div>
                       </td>
                       <td className="p-4 font-medium text-body">{s.customer_name}</td>
-                      <td className="min-w-[280px] p-4">
+                      <td className="min-w-[210px] p-4">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {s.sourceSummary.contractNos.slice(0, 2).map(contractNo => (
                             <span key={contractNo} className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] font-semibold text-body">{contractNo}</span>
@@ -1182,69 +1366,11 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                           </div>
                         )}
                       </td>
-                      <td className="p-4 font-bold text-ink">
+                      <td className="whitespace-nowrap p-4 font-bold text-ink">
                         {s.currency === 'USD' ? '$' : '￥'}{(s.amount || 0).toLocaleString()}
                       </td>
-                      <td className="p-4 text-right">
-                        <div className="flex justify-end gap-2">
-                          {s.status === '准备中' && (
-                            <>
-                              <Button
-                                onClick={() => void handleExportShipmentPlan(s.id)}
-                                tone="secondary"
-                                size="sm"
-                                disabled={exportingShipmentId === s.id}
-                                icon={<Download className="h-3.5 w-3.5" />}
-                              >
-                                {exportingShipmentId === s.id ? '导出中…' : '导出安排'}
-                              </Button>
-                              <Button
-                                onClick={() => handleOpenDispatch(s.id)}
-                                size="sm"
-                                icon={<Truck className="h-3.5 w-3.5" />}
-                              >
-                                确认实际发货
-                              </Button>
-                            </>
-                          )}
-                          {(s.invoice_state === 'pending' || s.invoice_state === 'invoiced') && (
-                            <Button
-                              onClick={() => handleOpenInvoice(s.id)}
-                              tone={s.invoice_state === 'invoiced' ? 'secondary' : 'subtle'}
-                              size="sm"
-                              icon={<ReceiptText className="h-3.5 w-3.5" />}
-                            >
-                              {s.invoice_state === 'invoiced' ? '修改开票' : '确认开票'}
-                            </Button>
-                          )}
-                          {canExportReceiptConfirmation(s) && (
-                            <Button
-                              onClick={() => void handleExportReceiptConfirmation(s.id)}
-                              tone="secondary"
-                              size="sm"
-                              disabled={exportingReceiptConfirmationId === s.id}
-                              icon={<FileText className="h-3.5 w-3.5" />}
-                            >
-                              {exportingReceiptConfirmationId === s.id ? '生成中…' : '收货确认函'}
-                            </Button>
-                          )}
-                          <IconButton
-                            onClick={() => handleOpenDetails(s.id)}
-                            label="查看发货清单"
-                            icon={<Eye className="w-3.5 h-3.5" />}
-                          />
-                          <IconButton
-                            onClick={() => handleOpenEdit(s.id)}
-                            label="编辑发货记录"
-                            icon={<Edit2 className="w-3.5 h-3.5" />}
-                          />
-                          <IconButton
-                            onClick={() => handleDelete(s.id)}
-                            label="撤销发货记录"
-                            tone="danger"
-                            icon={<Trash2 className="w-3.5 h-3.5" />}
-                          />
-                        </div>
+                      <td className="whitespace-nowrap px-3 py-4 text-right">
+                        {renderShipmentActions(s)}
                       </td>
                     </tr>
                   );
@@ -1255,17 +1381,18 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                 </tr>
               )}
             </tbody>
-      </DataTable>
+        </DataTable>
+      </div>
       <PaginationControls {...shipmentPage} onPageChange={shipmentPage.setPage} itemLabel="笔发货记录" />
 
-      {/* Add Shipment Modal */}
+      {/* Create / Edit Preparing Shipment Modal */}
       {showAddModal && (
-        <Dialog onClose={() => setShowAddModal(false)} ariaLabel="创建发货记录">
+        <Dialog onClose={() => setShowAddModal(false)} ariaLabel={editingShipmentGroupId ? '编辑发货安排' : '创建发货安排'}>
           <div className="dialog-panel flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden">
             <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
               <div>
-                <h3 className="font-heading text-lg font-bold text-ink">创建发货安排</h3>
-                <p className="mt-1 text-[11px] text-muted">先占用库存并导出 Excel；货物真正发出后，再在列表中确认真实发货日期和数量。</p>
+                <h3 className="font-heading text-lg font-bold text-ink">{editingShipmentGroupId ? '编辑发货安排' : '创建发货安排'}</h3>
+                <p className="mt-1 text-[11px] text-muted">{editingShipmentGroupId ? '可新增、删减或调整产品与批次数量；保存后会重新占用库存并生成最新版 Excel。' : '先占用库存并导出 Excel；货物真正发出后，再在列表中确认真实发货日期和数量。'}</p>
               </div>
               <IconButton onClick={() => setShowAddModal(false)} label="关闭创建发货记录" icon={<X className="h-5 w-5" />} />
             </header>
@@ -1282,6 +1409,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                       placeholder="请选择客户"
                       searchPlaceholder="输入客户名称搜索"
                       emptyMessage="没有匹配的已有客户"
+                      disabled={Boolean(editingShipmentGroupId)}
                     />
                   </FormField>
                   <FormField label="发货编号" required htmlFor="new-shipment-no">
@@ -1294,22 +1422,6 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                     <input id="new-shipment-notes" type="text" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="如柜号、船期、航名或提单号" className="w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-body" />
                   </FormField>
                 </div>
-
-                {paymentCheckResults.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="font-bold text-body">各合同发货前收款校验</div>
-                    {paymentCheckResults.map(result => (
-                      <div key={result.contract.id} className={`flex gap-3 rounded-xl border p-3 ${result.check.status === 'rejected' ? 'border-brand-rose/25 bg-brand-rose/10 text-brand-rose' : result.check.status === 'warning' ? 'border-brand-amber/25 bg-brand-amber/10 text-brand-amber' : 'border-brand-emerald/25 bg-brand-emerald/10 text-brand-emerald'}`}>
-                        {result.check.status === 'approved' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-                        <div>
-                          <div className="font-bold">合同 {result.contract.contract_no}</div>
-                          <div className="mt-1 text-[10px] text-body">合同额 {result.contractAmount.toFixed(2)} · 已收 {result.totalPaid.toFixed(2)} · 本次发货 {result.proposedShipmentAmt.toFixed(2)}</div>
-                          <div className="mt-1 text-[10px] font-medium">{result.check.message}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
 
                 {customerId && (
                   <div className="space-y-3.5">
@@ -1396,6 +1508,40 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
               </div>
 
               <footer className="shrink-0 border-t border-border bg-surface px-5 py-4 sm:px-6">
+                {shipmentDraftSummary.totalShippedQuantity > 0 && (
+                  <div className={`mb-3 flex flex-col gap-3 rounded-xl border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${shipmentDraftVolume.missingItemCount > 0 || packagingVersionsError ? 'border-brand-amber/30 bg-brand-amber/8' : 'border-brand-emerald/30 bg-brand-emerald/8'}`}>
+                    <div className="flex items-start gap-3">
+                      <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${shipmentDraftVolume.missingItemCount > 0 || packagingVersionsError ? 'bg-brand-amber/15 text-brand-amber' : 'bg-brand-emerald/15 text-brand-emerald'}`}>
+                        <Boxes className="h-5 w-5" />
+                      </span>
+                      <div>
+                        <div className="text-xs font-bold text-ink">预计装柜总体积</div>
+                        <div className="mt-1 text-[10px] leading-4 text-muted">每个批号的零头箱分别向上取整为整箱，避免低估实际占用空间。</div>
+                      </div>
+                    </div>
+                    <div className="text-left sm:text-right">
+                      {isPackagingVersionsLoading ? (
+                        <div className="text-sm font-bold text-muted">正在读取包装体积…</div>
+                      ) : packagingVersionsError ? (
+                        <div className="max-w-md text-xs font-semibold text-brand-amber">包装版本读取失败，暂时无法计算总体积：{packagingVersionsError}</div>
+                      ) : shipmentDraftVolume.calculatedItemCount > 0 ? (
+                        <>
+                          <div className={`font-heading text-xl font-extrabold ${shipmentDraftVolume.missingItemCount > 0 ? 'text-brand-amber' : 'text-brand-emerald'}`}>
+                            {shipmentDraftVolume.missingItemCount > 0 ? '至少 ' : ''}{shipmentDraftVolume.totalVolumeM3.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m³
+                          </div>
+                          <div className="mt-1 text-[10px] font-medium text-muted">已计算 {shipmentDraftVolume.totalCartons.toLocaleString()} 个整箱 · {shipmentDraftVolume.calculatedItemCount} 个批号</div>
+                        </>
+                      ) : (
+                        <div className="text-sm font-bold text-brand-amber">当前所选批号暂时无法计算总体积</div>
+                      )}
+                      {!isPackagingVersionsLoading && !packagingVersionsError && shipmentDraftVolume.missingItemCount > 0 && (
+                        <div className="mt-1 max-w-md text-[10px] font-semibold leading-4 text-brand-amber">
+                          另有 {shipmentDraftVolume.missingItemCount} 个批号未计入：联系单 {shipmentDraftVolume.missingContactSheetNos.join('、')}，请补充包装模板及外箱尺寸。
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-muted">
                     <span className="flex items-center gap-1.5 font-semibold text-ink"><Truck className="h-4 w-4 text-brand-cyan" />本次安排 {shipmentDraftSummary.totalShippedQuantity.toLocaleString()}</span>
@@ -1408,7 +1554,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                     {operationError && <div className="mr-auto text-xs text-brand-rose">{operationError}</div>}
                     <Button type="button" onClick={() => setShowAddModal(false)} tone="secondary">取消</Button>
                     <Button type="submit" disabled={isSaving || !customerId || shipmentDraftSummary.totalShippedQuantity === 0}>
-                      {isSaving ? '保存并生成中...' : '创建安排并导出 Excel'}
+                      {isSaving ? '保存并生成中...' : editingShipmentGroupId ? '保存安排并重新导出 Excel' : '创建安排并导出 Excel'}
                     </Button>
                   </div>
                 </div>
@@ -1418,133 +1564,13 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         </Dialog>
       )}
 
-      {/* Edit Shipment Modal */}
-      {showEditModal && (
-        <Dialog onClose={() => setShowEditModal(false)} ariaLabel="编辑发货记录">
-          <div className="dialog-panel w-full max-w-lg p-6 space-y-6">
-            <div className="flex justify-between items-center pb-2 border-b border-white/[0.04]">
-              <h3 className="font-heading font-bold text-lg text-white">编辑发货记录</h3>
-              <IconButton onClick={() => setShowEditModal(false)} label="关闭编辑发货记录" icon={<X className="w-5 h-5" />} />
-            </div>
-
-            <form onSubmit={handleSubmitEdit} className="space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-slate-400">发货编号 <span className="text-brand-rose">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    value={editShipmentNo}
-                    onChange={(e) => setEditShipmentNo(e.target.value)}
-                    className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200 font-semibold"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-slate-400">发货日期</label>
-                  <input
-                    type="date"
-                    value={editShipmentDate}
-                    onChange={(e) => setEditShipmentDate(e.target.value)}
-                    className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-slate-400">发货状态</label>
-                <select
-                  value={editShipmentStatus}
-                  onChange={(e) => setEditShipmentStatus(e.target.value as '准备中' | '已发货' | '取消')}
-                  className="w-full bg-slate-800 border border-white/[0.06] rounded-lg px-3 py-2.5 text-slate-200"
-                >
-                  <option value="准备中">准备中</option>
-                  <option value="已发货">已发货</option>
-                  <option value="取消">取消</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-slate-400">备注</label>
-                <textarea
-                  value={editShipmentNotes}
-                  onChange={(e) => setEditShipmentNotes(e.target.value)}
-                  rows={3}
-                  className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200 resize-none"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-white/[0.04] pb-1">
-                  <span className="font-bold text-slate-300">调整装车明细</span>
-                  <span className="text-[10px] text-slate-500">可用量已扣除其他发货记录</span>
-                </div>
-                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                  {editShipmentAllocations.length > 0 ? (
-                    editShipmentAllocations.map((item, idx) => (
-                      <div key={`${item.batch_id}-${idx}`} className="p-3 bg-white/[0.01] border border-white/[0.04] rounded-lg flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
-                        <div className="space-y-0.5 flex-1">
-                          <div className="font-semibold text-slate-200">
-                            联系单 <span className="text-brand-cyan font-bold">{item.contact_sheet_no || '暂无'}</span> <span className="text-slate-600">|</span> 批号: {item.batch_no}
-                          </div>
-                          <div className="text-[10px] text-slate-500">物料号 {item.material_no} | {item.product_name}</div>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <button
-                            type="button"
-                            onClick={() => handleEditQtyChange(idx, item.availableQty)}
-                            className="text-[11px] text-brand-cyan hover:underline font-bold"
-                            title="填入全部可用量"
-                          >
-                            可用 {item.availableQty.toLocaleString()}
-                          </button>
-                          <input
-                            type="number"
-                            step="0.001"
-                            inputMode="decimal"
-                            max={item.availableQty}
-                            min={0}
-                            value={item.shippedQty || ''}
-                            onChange={(e) => handleEditQtyChange(idx, parseFloat(e.target.value) || 0)}
-                            className="w-20 bg-slate-900/60 border border-white/[0.08] rounded px-2.5 py-1 text-slate-200 text-center font-bold text-brand-cyan"
-                          />
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center text-slate-500 italic py-5">该发货记录暂无可调整的批次明细</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-white/[0.04] flex justify-end gap-3">
-                {operationError && <div className="mr-auto text-xs text-brand-rose">{operationError}</div>}
-                <Button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  tone="secondary"
-                >
-                  取消
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isSaving}
-                >
-                  {isSaving ? '保存中...' : '保存修改'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </Dialog>
-      )}
-
       {showDispatchModal && dispatchTarget && (
         <Dialog onClose={() => !isDispatchSaving && setShowDispatchModal(false)} ariaLabel="确认实际发货">
-          <div className="dialog-panel flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden">
+          <div className="dialog-panel flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden">
             <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5">
               <div>
                 <h3 className="font-heading text-lg font-bold text-ink">确认实际发货</h3>
-                <p className="mt-1 text-xs text-muted">可以按真实情况调整数量；上限已包含本安排原先占用的库存，但不会超过联系单或批次总量。</p>
+                <p className="mt-1 text-xs text-muted">这里只确认真实发货日期；产品与数量以当前发货安排为准。</p>
               </div>
               <IconButton onClick={() => setShowDispatchModal(false)} label="关闭确认实际发货窗口" icon={<X className="h-5 w-5" />} disabled={isDispatchSaving} />
             </header>
@@ -1553,6 +1579,14 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                 <div className="rounded-xl border border-brand-cyan/20 bg-brand-cyan/5 p-4">
                   <div className="font-heading text-base font-bold text-ink">{dispatchTarget.shipment_no}</div>
                   <div className="mt-1 text-xs text-muted">{dispatchTarget.customer_name} · {dispatchTarget.sourceSummary.contractNos.join('、')}</div>
+                  <div className="mt-2 text-[11px] font-semibold text-body">{dispatchAllocations.length} 条发货明细 · 安排数量 {dispatchTarget.sourceSummary.totalQuantity.toLocaleString()}</div>
+                </div>
+                <div aria-label="发货明细核对提醒" className="flex items-start gap-3 rounded-xl border border-brand-amber/25 bg-brand-amber/10 px-4 py-3 text-xs text-brand-amber">
+                  <Eye className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="leading-5">
+                    <div className="font-bold">请先通过列表右侧的小眼睛核对发货明细</div>
+                    <div className="text-body">如产品、批号或数量有差异，请取消并先使用“编辑安排”；确认后记录将锁定，更正需作废并复制。</div>
+                  </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FormField label="真实发货日期" required htmlFor="actual-shipment-date">
@@ -1561,40 +1595,6 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                   <FormField label="实际发货备注" htmlFor="actual-shipment-notes">
                     <input id="actual-shipment-notes" value={dispatchNotes} onChange={(event) => setDispatchNotes(event.target.value)} placeholder="如柜号、船期、航名或提单号" className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-ink" />
                   </FormField>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between border-b border-border pb-2">
-                    <span className="text-xs font-bold text-body">核对实际发货数量</span>
-                    <span className="text-[10px] text-muted">可填 0 移除某条明细</span>
-                  </div>
-                  {dispatchAllocations.map((item, index) => (
-                    <div key={`${item.contact_sheet_id}-${item.batch_id}-${index}`} className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/35 p-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap gap-1.5 text-[10px] text-muted">
-                          <span>合同 {item.contract_no}</span>
-                          <span>联系单 {item.contact_sheet_no || '未填写'}</span>
-                          <span>批号 {item.batch_no}</span>
-                        </div>
-                        <div className="mt-1 truncate text-xs font-semibold text-body">{item.product_name}</div>
-                      </div>
-                      <label className="flex shrink-0 items-center gap-2 text-[11px] text-muted">
-                        <span>最多 {item.availableQty.toLocaleString()}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={item.availableQty}
-                          step="0.001"
-                          inputMode="decimal"
-                          value={item.shippedQty || ''}
-                          onChange={(event) => setDispatchAllocations((current) => current.map((row, rowIndex) => rowIndex === index ? {
-                            ...row,
-                            shippedQty: normalizeShipmentQuantity(Math.min(row.availableQty, Math.max(0, parseFloat(event.target.value) || 0)))
-                          } : row))}
-                          className="w-28 rounded-lg border border-border bg-surface px-2.5 py-2 text-right text-sm font-bold text-brand-cyan"
-                        />
-                      </label>
-                    </div>
-                  ))}
                 </div>
                 {dispatchError && <div role="alert" className="rounded-lg border border-brand-rose/25 bg-brand-rose/10 px-4 py-3 text-xs text-brand-rose">{dispatchError}</div>}
               </div>
@@ -1706,92 +1706,168 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         </Dialog>
       )}
 
+      {showShipmentExportModal && shipmentExportSelection && (
+        <Dialog onClose={() => setShowShipmentExportModal(false)} ariaLabel="选择发货明细导出格式">
+          <div className="dialog-panel w-full max-w-xl overflow-hidden">
+            <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
+              <div>
+                <h3 className="font-heading text-lg font-bold text-ink">
+                  导出{shipmentExportSelection.status === '准备中' ? '发货安排' : '实际发货清单'}
+                </h3>
+                <p className="mt-1 text-xs font-semibold text-brand-cyan">{shipmentExportSelection.shipment_no}</p>
+              </div>
+              <IconButton onClick={() => setShowShipmentExportModal(false)} label="关闭导出格式选择" icon={<X className="h-5 w-5" />} />
+            </header>
+            <div className="space-y-3 px-5 py-5 sm:px-6">
+              <p className="text-xs leading-5 text-muted">两种格式都会按合同号、联系单号、批号依次从小到大排列，并包含物料号。</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setShipmentExportDetailMode('batch')}
+                  className={`rounded-xl border p-4 text-left transition ${shipmentExportDetailMode === 'batch' ? 'border-brand-cyan bg-brand-cyan/6 ring-1 ring-brand-cyan/20' : 'border-border bg-surface hover:border-brand-cyan/40'}`}
+                >
+                  <div className="text-sm font-bold text-ink">每批1行</div>
+                  <div className="mt-1 text-xs leading-5 text-muted">每个实际批号单独一行，适合逐批核货。</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShipmentExportDetailMode('contact-sheet')}
+                  className={`rounded-xl border p-4 text-left transition ${shipmentExportDetailMode === 'contact-sheet' ? 'border-brand-cyan bg-brand-cyan/6 ring-1 ring-brand-cyan/20' : 'border-border bg-surface hover:border-brand-cyan/40'}`}
+                >
+                  <div className="text-sm font-bold text-ink">每联系单1行</div>
+                  <div className="mt-1 text-xs leading-5 text-muted">数量按联系单汇总，连续批号显示为 262062031-35。</div>
+                </button>
+              </div>
+            </div>
+            <footer className="flex justify-end gap-3 border-t border-border bg-surface-muted/35 px-5 py-4 sm:px-6">
+              <Button type="button" tone="secondary" onClick={() => setShowShipmentExportModal(false)} disabled={exportingShipmentId === shipmentExportSelection.id}>取消</Button>
+              <Button
+                type="button"
+                icon={<Download className="h-4 w-4" />}
+                disabled={exportingShipmentId === shipmentExportSelection.id}
+                onClick={() => void handleExportShipmentPlan(shipmentExportSelection.id, shipmentExportDetailMode)}
+              >
+                {exportingShipmentId === shipmentExportSelection.id ? '导出中…' : `导出${shipmentExportDetailMode === 'batch' ? '每批' : '每联系单'}明细`}
+              </Button>
+            </footer>
+          </div>
+        </Dialog>
+      )}
+
       {/* Shipment Details view Modal */}
       {showDetailModal && selectedShipmentDetails && (
         <Dialog onClose={() => setShowDetailModal(false)} ariaLabel="发货装柜清单">
-          <div className="dialog-panel w-full max-w-2xl p-6 space-y-6">
-            <div className="flex justify-between items-center border-b border-white/[0.04] pb-3">
-              <h3 className="font-heading font-bold text-lg text-white">
-                发货装柜清单: {selectedShipmentDetails.shipment.shipment_no}
-              </h3>
+          <div className="dialog-panel flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden">
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
+              <div>
+                <h3 className="font-heading text-lg font-bold text-ink">发货装柜清单</h3>
+                <p className="mt-1 text-xs font-semibold text-brand-cyan">{selectedShipmentDetails.shipment.shipment_no}</p>
+              </div>
               <IconButton onClick={() => setShowDetailModal(false)} label="关闭发货装柜清单" icon={<X className="w-5 h-5" />} />
-            </div>
+            </header>
 
-            <div className="space-y-4 text-xs">
-              <div className="grid grid-cols-3 gap-4 text-[11px] text-slate-400">
-                <div>关联合同: <span className="text-white font-medium">{selectedShipmentDetails.shipment.contract_no}</span></div>
-                <div>客户名称: <span className="text-white font-medium">{selectedShipmentDetails.shipment.customer_name}</span></div>
-                <div>发货日期: <span className="text-white font-medium">{selectedShipmentDetails.shipment.shipment_date}</span></div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+              <div className="grid gap-2 rounded-xl border border-border bg-surface-muted/45 p-3 text-[11px] sm:grid-cols-3">
+                <div><span className="text-muted">关联合同</span><strong className="mt-0.5 block text-body">{selectedShipmentDetails.shipment.contract_no}</strong></div>
+                <div><span className="text-muted">客户名称</span><strong className="mt-0.5 block text-body">{selectedShipmentDetails.shipment.customer_name}</strong></div>
+                <div><span className="text-muted">发货日期</span><strong className="mt-0.5 block text-body">{selectedShipmentDetails.shipment.shipment_date}</strong></div>
               </div>
 
-              <div className="space-y-2 border-t border-white/[0.04] pt-4">
-                <div className="font-bold text-slate-300 text-xs block pb-1">装车明细列表</div>
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {selectedShipmentDetails.items.map((item) => {
-                    const sourceContractNo = shipments.find(row => row.id === item.shipment_id)?.contract_no || '未关联合同';
-                    return (
-                      <div key={item.id} className="flex items-center justify-between rounded-lg border border-border bg-surface-muted/45 p-3">
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted">
-                            <span className="rounded-md border border-border bg-surface px-2 py-1">合同 {sourceContractNo}</span>
-                            <span className="rounded-md border border-border bg-surface px-2 py-1">联系单 {item.contact_sheet_no || '未填写'}</span>
-                            <span>批号 {item.batch_no}</span>
-                          </div>
-                          <div className="font-semibold text-body">{item.product_name}</div>
-                          <div className="text-[10px] text-muted">规格 {item.specification} · 物料号 {item.material_no}</div>
-                        </div>
-                        <div className="flex flex-col items-end text-right">
-                          <div className="flex items-center gap-1.5 font-bold text-ink">
-                            <span>{item.shipped_quantity.toLocaleString()} {item.unit || '支'}</span>
-                            {item.pcs_per_carton ? (
-                              <span className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-muted">
-                                {(item.shipped_quantity / item.pcs_per_carton).toFixed(1)} 箱
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="text-[10px] text-brand-cyan">${item.amount.toLocaleString()}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {(() => {
-                const totalCartons = selectedShipmentDetails.items.reduce((sum, item) => {
-                  if (item.pcs_per_carton) {
-                    return sum + (item.shipped_quantity / item.pcs_per_carton);
-                  }
-                  return sum;
-                }, 0);
-
-                return (
-                  <div className="border-t border-white/[0.04] pt-4 flex justify-between items-center flex-wrap gap-2">
-                    <span className="text-slate-400">备注: {selectedShipmentDetails.shipment.notes || '无'}</span>
-                    <div className="flex items-center gap-4">
-                      {totalCartons > 0 && (
-                        <span className="text-xs bg-brand-cyan/10 border border-brand-cyan/20 px-2 py-0.5 rounded text-brand-cyan font-bold">
-                          发货总箱数: {totalCartons.toFixed(1)} 箱
-                        </span>
-                      )}
-                      <span className="font-bold text-base text-white">
-                        发货总额: {selectedShipmentDetails.shipment.currency === 'USD' ? '$' : '￥'}{selectedShipmentDetails.shipment.amount.toLocaleString()}
-                      </span>
+              <section className="mt-4">
+                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-ink">装车明细</div>
+                    <div className="mt-0.5 text-[10px] text-muted">
+                      {shipmentDetailMode === 'batch'
+                        ? `共 ${selectedShipmentDetails.items.length} 个批号；每批零头单独向上取整为整箱`
+                        : `共 ${selectedShipmentDisplayRows.length} 个联系单；批号已汇总，每批零头仍单独向上取整为整箱`}
                     </div>
                   </div>
-                );
-              })()}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex rounded-lg border border-border bg-surface p-0.5 text-[10px] font-semibold">
+                      <button type="button" onClick={() => setShipmentDetailMode('batch')} className={`rounded-md px-2.5 py-1.5 transition ${shipmentDetailMode === 'batch' ? 'bg-brand-cyan text-white shadow-sm' : 'text-muted hover:text-ink'}`}>每批1行</button>
+                      <button type="button" onClick={() => setShipmentDetailMode('contact-sheet')} className={`rounded-md px-2.5 py-1.5 transition ${shipmentDetailMode === 'contact-sheet' ? 'bg-brand-cyan text-white shadow-sm' : 'text-muted hover:text-ink'}`}>每联系单1行</button>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-[10px] font-semibold text-muted">体积为装柜估算</span>
+                  </div>
+                </div>
+                <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
+                  {selectedShipmentDisplayRows.map((item) => (
+                      <div key={item.rowKey} className="grid gap-3 rounded-xl border border-border bg-surface p-3 shadow-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted">
+                            <span className="rounded-md border border-border bg-surface px-2 py-1">合同 {item.contract_no || '未关联合同'}</span>
+                            <span className="rounded-md border border-border bg-surface px-2 py-1">联系单 {item.contact_sheet_no || '未填写'}</span>
+                            <span className="rounded-md bg-brand-purple/8 px-2 py-1 font-semibold text-brand-purple">
+                              {shipmentDetailMode === 'batch' ? '批号' : `批号汇总 · ${item.batchCount} 批`} {item.batch_no || '未填写'}
+                            </span>
+                          </div>
+                          <div className="truncate font-semibold text-body">{item.product_name}</div>
+                          <div className="text-[10px] text-muted">规格 {item.specification || '未填写'} · 物料号 {item.material_no || '未填写'}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-5 gap-y-2 text-right sm:grid-cols-4 sm:gap-x-6">
+                          <div>
+                            <div className="text-[9px] text-muted">发货数量</div>
+                            <div className="mt-0.5 whitespace-nowrap text-xs font-bold text-ink">{item.shipped_quantity.toLocaleString()} {item.unit || '支'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[9px] text-muted">预计整箱</div>
+                            <div className="mt-0.5 whitespace-nowrap text-xs font-bold text-body">
+                              {isPackagingVersionsLoading ? '读取中…' : packagingVersionsError ? '暂不可用' : item.volume.isCalculated ? `${item.volume.cartons.toLocaleString()} 箱` : '未计入'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[9px] text-muted">预计体积</div>
+                            <div className={`mt-0.5 whitespace-nowrap text-xs font-bold ${item.volume.isCalculated && !packagingVersionsError ? 'text-brand-emerald' : 'text-brand-amber'}`}>
+                              {isPackagingVersionsLoading ? '读取中…' : packagingVersionsError ? '暂不可用' : item.volume.isCalculated ? `${item.volume.volumeM3.toLocaleString('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 4 })} m³` : '资料不完整'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[9px] text-muted">发货金额</div>
+                            <div className="mt-0.5 whitespace-nowrap text-xs font-bold text-brand-cyan">{selectedShipmentDetails.shipment.currency === 'USD' ? '$' : '￥'}{item.amount.toLocaleString()}</div>
+                          </div>
+                        </div>
+                      </div>
+                  ))}
+                </div>
+              </section>
             </div>
 
-            <div className="pt-4 border-t border-white/[0.06] flex justify-end">
-              <button
-                onClick={() => setShowDetailModal(false)}
-                className="px-4 py-2 border border-slate-800 hover:bg-slate-800/50 rounded-lg text-slate-400 text-xs font-semibold"
-              >
-                关闭
-              </button>
-            </div>
-
+            <footer className="shrink-0 border-t border-border bg-surface-muted/35 px-5 py-4 sm:px-6">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0 text-[10px] leading-4 text-muted">
+                  <span className="font-semibold text-body">备注：</span>{selectedShipmentDetails.shipment.notes || '无'}
+                  {!isPackagingVersionsLoading && !packagingVersionsError && selectedShipmentDetails.volumeSummary.missingItemCount > 0 && (
+                    <div className="mt-1 font-semibold text-brand-amber">
+                      {selectedShipmentDetails.volumeSummary.missingItemCount} 个批号未计入总体积：联系单 {selectedShipmentDetails.volumeSummary.missingContactSheetNos.join('、')}。
+                    </div>
+                  )}
+                  {packagingVersionsError && <div className="mt-1 font-semibold text-brand-amber">包装版本读取失败：{packagingVersionsError}</div>}
+                </div>
+                <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="rounded-lg border border-border bg-surface px-3 py-2 text-right">
+                    <div className="text-[9px] text-muted">{shipmentDetailMode === 'batch' ? '装车批号' : '装车联系单'}</div>
+                    <div className="mt-0.5 text-sm font-bold text-ink">{selectedShipmentDisplayRows.length.toLocaleString()} 个</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-surface px-3 py-2 text-right">
+                    <div className="text-[9px] text-muted">预计总箱数</div>
+                    <div className="mt-0.5 whitespace-nowrap text-sm font-bold text-body">
+                      {isPackagingVersionsLoading ? '读取中…' : packagingVersionsError ? '暂不可用' : selectedShipmentDetails.volumeSummary.calculatedItemCount > 0 ? `${selectedShipmentDetails.volumeSummary.missingItemCount > 0 ? '至少 ' : ''}${selectedShipmentDetails.volumeSummary.totalCartons.toLocaleString()} 箱` : '资料不完整'}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg border px-3 py-2 text-right ${selectedShipmentDetails.volumeSummary.missingItemCount > 0 || packagingVersionsError ? 'border-brand-amber/25 bg-brand-amber/8' : 'border-brand-emerald/25 bg-brand-emerald/8'}`}>
+                    <div className="text-[9px] text-muted">预计总体积</div>
+                    <div className={`mt-0.5 whitespace-nowrap text-sm font-extrabold ${selectedShipmentDetails.volumeSummary.missingItemCount > 0 || packagingVersionsError ? 'text-brand-amber' : 'text-brand-emerald'}`}>
+                      {isPackagingVersionsLoading ? '读取中…' : packagingVersionsError ? '暂不可用' : selectedShipmentDetails.volumeSummary.calculatedItemCount > 0 ? `${selectedShipmentDetails.volumeSummary.missingItemCount > 0 ? '至少 ' : ''}${selectedShipmentDetails.volumeSummary.totalVolumeM3.toLocaleString('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³` : '资料不完整'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-brand-cyan/20 bg-brand-cyan/5 px-3 py-2 text-right">
+                    <div className="text-[9px] text-muted">发货总额</div>
+                    <div className="mt-0.5 whitespace-nowrap text-sm font-extrabold text-brand-cyan">{selectedShipmentDetails.shipment.currency === 'USD' ? '$' : '￥'}{selectedShipmentDetails.shipment.amount.toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+            </footer>
           </div>
         </Dialog>
       )}

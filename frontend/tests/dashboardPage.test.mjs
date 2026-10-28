@@ -26,4 +26,24 @@ test('首页财年进度明确使用连续螺旋表达多圈进度', () => {
   assert.match(dashboard, /每 100% 为一圈/);
   assert.match(dashboard, /沿同一条螺旋连续向外延伸/);
   assert.match(dashboard, /<FiscalProgressRing/);
+  assert.match(dashboard, /const FISCAL_RING_COLOR = '#ad8557'/);
+  assert.match(dashboard, /const fiscalRingCapacity = Math\.max/);
+  assert.match(dashboard, /<FiscalProgressRing current=\{card\.current\} previous=\{card\.previous\} color=\{FISCAL_RING_COLOR\} sharedCapacityTurns=\{fiscalRingCapacity\}/);
+  assert.doesNotMatch(dashboard, /<FiscalProgressRing[^>]+color=\{card\.color\}/);
+});
+
+test('经营节奏趋势使用整数参照线且图例与柱子共用同一顺序', () => {
+  assert.match(dashboard, /const TREND_SERIES = \[/);
+  assert.match(dashboard, /ticks=\{trendAxis\.ticks\}/);
+  assert.match(dashboard, /domain=\{\[0, trendAxis\.domainMax\]\}/);
+  assert.match(dashboard, /stroke="#e4ddd4" strokeDasharray="4 4"/);
+  assert.match(dashboard, /TREND_SERIES\.map\(\(series\) => \(/);
+  assert.match(dashboard, /aria-label="图表图例"/);
+});
+
+test('经营节奏趋势悬浮信息与图例共用新增订单、到账回款、实际发货顺序', () => {
+  assert.match(dashboard, /function TrendTooltip/);
+  assert.match(dashboard, /content=\{<TrendTooltip \/>\}/);
+  assert.match(dashboard, /TrendTooltip[\s\S]*TREND_SERIES\.map\(\(series\) => \(/);
+  assert.doesNotMatch(dashboard, /formatter=\{\(value, name\)/);
 });

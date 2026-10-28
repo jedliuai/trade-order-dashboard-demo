@@ -1,4 +1,5 @@
 import { isAllowedContactSheetUnit } from './formOptions.ts';
+import { isMaterialNumberRequiredAtEntry } from './materialNumberRules.ts';
 
 export interface ContactSheetFormDraft {
   businessType: '制剂' | '原料药';
@@ -20,6 +21,10 @@ export type ContactSheetFormErrors = Partial<Record<ContactSheetFormField, strin
 const DOSAGE_UNIT_PATTERN = /(^|[^A-Za-z])((?:miu|mcg|iu|kg|mg|ug|ml|g|l|u))(?=$|[^A-Za-z])/gi;
 const NUMBER_UNIT_GAP_PATTERN = /(\d)\s+(?=(?:miu|mcg|iu|kg|mg|ug|ml|g|l|u)(?:$|[^A-Za-z]))/gi;
 
+export function normalizeDecimalInput(value: string): string {
+  return value.startsWith('.') ? `0${value}` : value;
+}
+
 export function normalizeContactSheetSpecification(value: string): string {
   return value
     .normalize('NFKC')
@@ -35,7 +40,7 @@ export function validateContactSheetForm(draft: ContactSheetFormDraft): ContactS
   if (!draft.contractId) {
     errors.contractId = '请选择下拉列表中已有的销售合同。';
   }
-  if (!draft.materialNo.trim()) {
+  if (isMaterialNumberRequiredAtEntry(draft.businessType) && !draft.materialNo.trim()) {
     errors.materialNo = '请填写物料号。';
   }
   if (draft.requiresProductVariant === true && !draft.productVariantId) {

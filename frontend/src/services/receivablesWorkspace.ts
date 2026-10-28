@@ -35,6 +35,21 @@ export interface ShipmentSettlementSummary {
   status: '已收全款' | '部分收款' | '未收款';
 }
 
+export interface ShipmentPaymentCoverageFact {
+  contractId: string;
+  shipmentId: string;
+  shipmentAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+}
+
+export interface ShipmentPaymentCoverageSummary {
+  shipmentAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: '已收齐' | '未收齐';
+}
+
 export interface CurrentReceivableInput {
   contracts: Contract[];
   sheets: ContactSheet[];
@@ -196,7 +211,7 @@ export function summarizeCurrentReceivableRmb(facts: CurrentReceivableFact[]) {
 
 /**
  * 汇总一笔物理发货（可能包含多个合同子记录）的实际收款状态。
- * 当前应收事实已经应用“指定发货优先、其余合同内先发先抵”，因此这里不能再用
+ * 当前应收事实已经应用“合同内按发货日期先发先抵”，因此这里不能再用
  * 合同是否全部收齐或是否手工关联发货来判断。
  */
 export function summarizeShipmentSettlement(
@@ -223,8 +238,80 @@ export function summarizeShipmentSettlement(
 }
 
 /**
- * 计算指定截止日的当前应收：只纳入已发货记录；指定发货的收款直接抵扣，
- * 其余合同级收款按发货日期先发先抵，同一发货中的产品按金额比例分摊余额。
+ * 统一计算准备中、已发货和已开票记录的回款覆盖情况。
+ * 收款只关联到合同，因此同一合同内按发货安排/实际发货日期先后抵扣；
+ * 取消记录退出计算，避免作废发货继续占用货款。
+ */
+export function calculateShipmentPaymentCoverage(input: Pick<
+  CurrentReceivableInput,
+  'contracts' | 'shipments' | 'shipmentItems' | 'payments' | 'asOfDate'
+>): ShipmentPaymentCoverageFact[] {
+  const asOfDate = input.asOfDate || '9999-12-31';
+  const itemsByShipment = new Map<string, ShipmentItem[]>();
+  input.shipmentItems.forEach((item) => {
+    const rows = itemsByShipment.get(item.shipment_id) || [];
+    rows.push(item);
+    itemsByShipment.set(item.shipment_id, rows);
+  });
+
+  const facts: ShipmentPaymentCoverageFact[] = [];
+  input.contracts.forEach((contract) => {
+    const contractShipments = input.shipments
+      .filter((shipment) => shipment.contract_id === contract.id && shipment.status !== '取消')
+      .sort((left, right) => {
+        const leftDate = left.shipment_date || '9999-12-31';
+        const rightDate = right.shipment_date || '9999-12-31';
+        const dateDiff = leftDate.localeCompare(rightDate);
+        return dateDiff || left.id.localeCompare(right.id, 'zh-CN', { numeric: true, sensitivity: 'base' });
+      });
+    if (contractShipments.length === 0) return;
+
+    let paymentPool = input.payments
+      .filter((payment) => payment.contract_id === contract.id
+        && Boolean(payment.payment_date)
+        && payment.payment_date <= asOfDate)
+      .reduce((sum, payment) => sum + paymentAmountInContractCurrency(payment, contract), 0);
+
+    contractShipments.forEach((shipment) => {
+      const items = itemsByShipment.get(shipment.id) || [];
+      const itemTotal = items.reduce((sum, item) => sum + effectiveItemAmount(item), 0);
+      const shipmentAmount = Math.max(0, itemTotal > 0 ? itemTotal : Number(shipment.amount || 0));
+      const paidAmount = Math.min(shipmentAmount, Math.max(0, paymentPool));
+      const outstandingAmount = Math.max(0, shipmentAmount - paidAmount);
+      paymentPool = Math.max(0, paymentPool - paidAmount);
+      facts.push({
+        contractId: contract.id,
+        shipmentId: shipment.id,
+        shipmentAmount,
+        paidAmount,
+        outstandingAmount
+      });
+    });
+  });
+
+  return facts;
+}
+
+export function summarizeShipmentPaymentCoverage(
+  shipmentIds: Iterable<string>,
+  facts: ShipmentPaymentCoverageFact[]
+): ShipmentPaymentCoverageSummary {
+  const ids = new Set(shipmentIds);
+  const related = facts.filter((fact) => ids.has(fact.shipmentId));
+  const shipmentAmount = related.reduce((sum, fact) => sum + fact.shipmentAmount, 0);
+  const paidAmount = related.reduce((sum, fact) => sum + fact.paidAmount, 0);
+  const outstandingAmount = related.reduce((sum, fact) => sum + fact.outstandingAmount, 0);
+  return {
+    shipmentAmount,
+    paidAmount,
+    outstandingAmount,
+    status: shipmentAmount > EPSILON && outstandingAmount <= EPSILON ? '已收齐' : '未收齐'
+  };
+}
+
+/**
+ * 计算指定截止日的当前应收：只纳入已发货记录；全部合同级收款按发货日期
+ * 先发先抵，同一发货中的产品按金额比例分摊余额。
  */
 export function calculateCurrentReceivables(input: CurrentReceivableInput): CurrentReceivableResult {
   const asOfDate = input.asOfDate || '9999-12-31';
@@ -265,12 +352,6 @@ export function calculateCurrentReceivables(input: CurrentReceivableInput): Curr
       .forEach((payment) => {
         let available = paymentAmountInContractCurrency(payment, contract);
         if (available <= EPSILON) return;
-        if (payment.shipment_id && balances.has(payment.shipment_id)) {
-          const balance = balances.get(payment.shipment_id) || 0;
-          const applied = Math.min(balance, available);
-          balances.set(payment.shipment_id, balance - applied);
-          available -= applied;
-        }
         fifoPaymentPool += available;
       });
 

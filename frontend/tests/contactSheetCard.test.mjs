@@ -55,14 +55,28 @@ test('完整批次信息和管理入口统一保留在联系单详情', () => {
   assert.match(detailSource, /handleOpenBatchEditor\(s\.id\)/);
 });
 
+test('联系单详情字段名称保留固定宽度且不拆字换行', () => {
+  assert.match(detailSource, /<col className="w-20" \/>/);
+  assert.match(detailSource, /\[&_td:first-child\]:whitespace-nowrap/);
+});
+
 test('效期编辑分区使用确认后的业务标题', () => {
   assert.match(contactSheetsSource, /title="包材实际印刷上的效期"/);
   assert.match(contactSheetsSource, /label="客户确认包装稿日期"/);
 });
 
-test('新联系单单价和数量输入框不再显示前置零', () => {
-  assert.match(contactSheetsSource, /value=\{unitPrice \|\| ''\}/);
+test('新联系单单价保留输入文本中的前置零，空数量仍不显示默认零', () => {
+  assert.match(contactSheetsSource, /value=\{unitPriceInput\}/);
+  assert.match(contactSheetsSource, /onChange=\{\(e\) => handleUnitPriceChange\(e\.target\.value\)\}/);
+  assert.match(contactSheetsSource, /setUnitPriceInput\(''\)/);
   assert.match(contactSheetsSource, /value=\{quantity \|\| ''\}/);
+});
+
+test('所属销售合同按客户顺序与合同日期排列，并支持搜索客户名称', () => {
+  assert.match(contactSheetsSource, /sortContractsByCustomerOrder/);
+  assert.match(contactSheetsSource, /sortCustomersForDisplay\(customers\)\.map\(customer => customer\.id\)/);
+  assert.match(contactSheetsSource, /searchText: \[contract\.contract_no, contract\.customer_name\]\.join\(' '\)/);
+  assert.match(contactSheetsSource, /searchPlaceholder="输入合同号或客户名称搜索"/);
 });
 
 test('新建、复制和编辑联系单共用规格标准化保存入口', () => {

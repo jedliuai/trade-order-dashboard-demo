@@ -13,6 +13,8 @@ WRITES = {fn.__name__: fn for fn in (
     shipments.create_shipment_with_items, shipments.replace_shipment_items,
     shipments.update_shipment_with_items, shipments.create_shipment_group_with_items,
     shipments.confirm_shipment_group_dispatched,
+    shipments.update_preparing_shipment_group_with_items,
+    shipments.delete_preparing_shipment_group, shipments.void_and_copy_shipment_group,
     finance.create_payment_receipt_with_allocations, finance.update_payment_receipt_with_allocations,
     finance.return_payment_allocation_to_deposit, finance.create_invoice_with_shipments,
     finance.update_invoice_with_shipments, finance.mark_physical_shipment_invoiced,

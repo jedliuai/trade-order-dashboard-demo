@@ -20,7 +20,7 @@ function normalizePositiveInteger(value: number, fallback: number) {
 }
 
 /**
- * 当前从本地完整缓存中切页；返回结构刻意与未来的 SQLite 服务端分页保持一致。
+ * 当前从本地完整缓存中切页；返回结构刻意与未来的 本地数据库 服务端分页保持一致。
  * 页面只依赖 PageResult，不需要知道数据是本地切片还是远端 range 查询。
  */
 export function queryLocalPage<T>(allRows: readonly T[], request: PageRequest): PageResult<T> {

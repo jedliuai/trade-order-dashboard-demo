@@ -9,6 +9,7 @@ test('相同业务状态在全系统使用固定展示色', () => {
   assert.equal(getBusinessStatusTone('部分发货'), 'progress');
   assert.equal(getBusinessStatusTone('待收款'), 'warning');
   assert.equal(getBusinessStatusTone('未收款'), 'warning');
+  assert.equal(getBusinessStatusTone('未收齐'), 'warning');
   assert.equal(getBusinessStatusTone('待开票 2 批'), 'warning');
   assert.equal(getBusinessStatusTone('交货期已逾期'), 'danger');
   assert.equal(getBusinessStatusTone('已归档'), 'neutral');

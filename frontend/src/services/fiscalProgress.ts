@@ -90,12 +90,14 @@ function spiralPath(
 export function buildFiscalSpiralGeometry(
   progress: FiscalProgressSegments,
   size = 78,
-  strokeWidth = 6
+  strokeWidth = 6,
+  sharedCapacityTurns?: number
 ): FiscalSpiralGeometry {
   const activeTurns = progress.percent === null ? 0 : progress.percent / 100;
   // 始终保留两圈柔和轨迹，让第一圈和“超过 100% 后继续向外”的方向一眼可辨。
   // 超过 200% 后再按实际需要扩展第三圈、第四圈。
-  const capacityTurns = Math.max(2, Math.ceil(Math.max(activeTurns, 0.0001) - 1e-10));
+  const requiredTurns = Math.max(2, Math.ceil(Math.max(activeTurns, 0.0001) - 1e-10));
+  const capacityTurns = Math.max(requiredTurns, Math.floor(sharedCapacityTurns || 0));
   const visibleTurns = Math.min(activeTurns, capacityTurns);
   const endpointPoint = visibleTurns > 0
     ? spiralPoint(visibleTurns, capacityTurns, size, strokeWidth)

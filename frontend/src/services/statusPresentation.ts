@@ -19,6 +19,7 @@ export const BUSINESS_STATUS_TONES = {
   '待收款': 'warning',
   '部分收款': 'warning',
   '未收款': 'warning',
+  '未收齐': 'warning',
   '需人工确认': 'warning',
   '待开票': 'warning',
   '发货后开票': 'warning',

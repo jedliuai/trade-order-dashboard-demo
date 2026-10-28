@@ -3,18 +3,20 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 test('品牌图标只替换合适入口且保留现有产品名称', async () => {
-  const [sidebar, app, html] = await Promise.all([
+  const [sidebar, app, dashboard, html] = await Promise.all([
     readFile(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/App.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/Dashboard.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../index.html', import.meta.url), 'utf8')
   ]);
 
   assert.match(sidebar, /trade-tracker-app-icon\.svg/);
-  assert.doesNotMatch(sidebar, />\s*DEMO\s*</);
+  assert.doesNotMatch(sidebar, />\s*RY\s*</);
   assert.match(sidebar, /个人订单驾驶舱/);
   assert.match(sidebar, /订单工作台/);
   assert.doesNotMatch(sidebar, /accountName|accountRole/);
   assert.match(app, /trade-tracker-mark\.svg/);
+  assert.doesNotMatch(dashboard, /您好，真实姓名/);
   assert.match(html, /trade-tracker-app-icon\.svg/);
 });
 

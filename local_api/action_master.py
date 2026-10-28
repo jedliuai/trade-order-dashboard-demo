@@ -94,6 +94,7 @@ def add_packaging_version(tx, profile, version_data):
     data.update(profile_id=profile['id'], owner_id=profile['owner_id'],
                 version_no=max((v['version_no'] for v in versions), default=0) + 1,
                 is_current=True, effective_from=effective, effective_to=None)
+    data['workshop'] = profile.get('workshop') or ''
     data.setdefault('source_type', 'manual')
     data.setdefault('review_status', 'pending')
     data.setdefault('created_by', tx.user)

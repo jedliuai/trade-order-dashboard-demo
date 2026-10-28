@@ -1,16 +1,15 @@
-import { calculateEstimatedReleaseDate, checkPaymentTermsBeforeShipment } from './businessRules';
-import {
-  downloadLocalFile,
-  localRequest, getLocalSession,
-  localRest
-} from './localClient';
+import { calculateEstimatedReleaseDate } from './businessRules';
+import { downloadLocalFile, localRequest, getLocalSession, localRest } from './localClient';
 import { isQaComplete } from './businessRules';
 import { formatLocalDate } from './dateUtils';
 import { resolveShipmentPaymentDisplayStatus } from './financialRules';
 import { normalizeCustomerCurrency } from './customerDefaults';
 import { normalizeCustomerIdentity } from './customerMerge';
 import { isAllowedContactSheetUnit, normalizeContactSheetUnit } from './formOptions';
-import { isPaymentType, type PaymentType } from './paymentAllocationTypes';
+import type { PaymentType } from './paymentAllocationTypes';
+
+// 数据库旧函数暂时仍要求这个兼容字段；发货回款状态不再读取或计算它。
+const LEGACY_PAYMENT_CHECK_STATUS = '需人工确认';
 
 export interface Customer {
   id: string;
@@ -108,8 +107,6 @@ export interface Batch {
   material_no: string;
   batch_no: string;
   batch_quantity: number;
-  production_date: string;
-  expiry_date: string;
   warehouse_date: string;
   release_date: string;
   notes: string;
@@ -168,6 +165,7 @@ export interface Payment {
   customer_name: string;
   export_type: '自营' | '转口';
   payment_date: string;
+  allocation_effective_date?: string;
   amount: number;
   currency: 'USD' | 'RMB';
   payment_type: PaymentType;
@@ -275,7 +273,7 @@ export interface Alert {
 
 export interface SyncLog {
   id: string;
-  sync_type: 'qa_email' | 'aps' | 'exchange_rate' | 'import' | 'export';
+  sync_type: 'exchange_rate' | 'import' | 'export';
   status: 'success' | 'failed' | 'partial';
   started_at: string;
   finished_at: string;
@@ -382,7 +380,7 @@ let lastLoadPerformance: DataLoadPerformance | null = null;
 
 function ownerId() {
   const id = getLocalSession()?.user?.id;
-  if (!id) throw new Error('请先在系统设置中登录 本地演示账户。');
+  if (!id) throw new Error('请先在系统设置中登录 本地数据库。');
   return id;
 }
 
@@ -633,7 +631,31 @@ function refreshDerived() {
 
 }
 
-const PUBLIC_EXCHANGE_RATE_OWNER_ID = 'demo-shared';
+
+function mapExchangeRateRow(row: any): ExchangeRate {
+  return {
+    id: row.id,
+    effective_month: str(row.effective_month),
+    currency_pair: str(row.currency_pair || 'USD/CNY'),
+    rate: num(row.rate),
+    source_date: str(row.source_date),
+    source: row.source === 'ChinaMoney' ? 'ChinaMoney' : 'Manual',
+    notes: str(row.notes),
+    created_at: str(row.created_at)
+  };
+}
+
+function mapSyncLogRow(row: any): SyncLog {
+  return {
+    id: row.id,
+    sync_type: (row.sync_type || 'import') as SyncLog['sync_type'],
+    status: (row.status || 'success') as SyncLog['status'],
+    started_at: str(row.started_at),
+    finished_at: str(row.finished_at),
+    message: str(row.message),
+    details: row.details
+  };
+}
 
 export async function initDataStore(_force = false) {
   lastLoadError = '';
@@ -643,7 +665,7 @@ export async function initDataStore(_force = false) {
   if (!currentOwnerId) {
     cache = emptyCache();
     cacheOwnerId = null;
-    lastLoadError = '未登录 本地演示账户，当前不会加载本地业务数据。';
+    lastLoadError = '未登录 本地数据库，当前不会加载本地业务数据。';
     return;
   }
 
@@ -695,7 +717,9 @@ export async function initDataStore(_force = false) {
         agreed_delivery_date: str(row.agreed_delivery_date),
         packaging_confirmed_date: str(row.packaging_confirmed_date),
         payment_terms: str(row.payment_terms),
-        prepayment_ratio: Number(row.prepayment_ratio || 0.3),
+        prepayment_ratio: row.prepayment_ratio === null || row.prepayment_ratio === undefined
+          ? 0.3
+          : Number(row.prepayment_ratio),
         internal_contract_seq: str(row.internal_contract_seq),
         status: str(row.status || '进行中'),
         customer_name: '',
@@ -733,7 +757,7 @@ export async function initDataStore(_force = false) {
         actual_warehousing_date: str(row.actual_warehousing_date),
         estimated_release_date: str(row.estimated_release_date),
         actual_release_date: str(row.actual_release_date),
-        aps_auto_query_enabled: Boolean(row.aps_auto_query_enabled ?? true),
+        aps_auto_query_enabled: false,
         reference_contact_sheet: str(row.reference_contact_sheet),
         notes: str(row.notes),
         created_at: str(row.created_at),
@@ -748,8 +772,6 @@ export async function initDataStore(_force = false) {
         contact_sheet_id: row.contact_sheet_id,
         batch_no: str(row.batch_no),
         batch_quantity: num(row.batch_quantity),
-        production_date: str(row.production_date),
-        expiry_date: str(row.expiry_date),
         warehouse_date: str(row.warehouse_date),
         release_date: str(row.release_date),
         notes: str(row.notes),
@@ -814,6 +836,7 @@ export async function initDataStore(_force = false) {
         contract_id: row.contract_id,
         shipment_id: row.shipment_id || undefined,
         payment_date: str(row.payment_date),
+        allocation_effective_date: str(row.allocation_effective_date || row.payment_date),
         amount: num(row.amount),
         currency: row.currency || 'USD',
         payment_type: row.payment_type || '其他',
@@ -861,16 +884,7 @@ export async function initDataStore(_force = false) {
         shipment_id: row.shipment_id,
         allocated_amount: num(row.allocated_amount)
       })),
-      exchangeRates: exchangeRates.map((row) => ({
-        id: row.id,
-        effective_month: str(row.effective_month),
-        currency_pair: str(row.currency_pair || 'USD/CNY'),
-        rate: num(row.rate),
-        source_date: str(row.source_date),
-        source: row.source || 'Manual',
-        notes: str(row.notes),
-        created_at: str(row.created_at)
-      })),
+      exchangeRates: exchangeRates.map(mapExchangeRateRow),
       alerts: alerts.map((row) => ({
         id: row.id,
         alert_type: str(row.alert_type),
@@ -883,15 +897,7 @@ export async function initDataStore(_force = false) {
         handled_at: row.handled_at || undefined,
         snoozed_until: row.snoozed_until || undefined
       })),
-      syncLogs: syncLogs.map((row) => ({
-        id: row.id,
-        sync_type: row.sync_type || 'import',
-        status: row.status || 'success',
-        started_at: str(row.started_at),
-        finished_at: str(row.finished_at),
-        message: str(row.message),
-        details: row.details
-      })),
+      syncLogs: syncLogs.map(mapSyncLogRow),
       shipmentProfits: shipmentProfits.map((row) => ({
         shipment_id: row.shipment_id,
         owner_id: row.owner_id,
@@ -1038,6 +1044,9 @@ async function refreshAfterConfirmedWrite(refreshAlerts = false) {
 
 const LOCAL_EXPORT_TYPES = {
   'export-production': true,
+  'export-expected-invoice': true,
+  'export-usd-actual-invoice': true,
+  'export-release-application': true,
   'export-monthly': true,
   'export-original-contracts': true,
   'export-helper': true,
@@ -1125,7 +1134,7 @@ export const db = {
     sync_logs: cache.syncLogs,
     shipment_profit_view: cache.shipmentProfits,
     exported_at: new Date().toISOString(),
-    source: 'local-cache'
+    source: 'sqlite-cache'
   }),
   getTable: <T,>(key: string): T[] => {
     if (key.includes('shipment_items')) return cache.shipmentItems as T[];
@@ -1137,7 +1146,7 @@ export const db = {
   getGlobalContactSheetNumberConflict,
   getGlobalContractNumberConflict,
   getGlobalBatchNumberConflicts,
-  runLocalExport: async (
+  runWorkerExport: async (
     command: keyof typeof LOCAL_EXPORT_TYPES,
     filters?: Record<string, string | string[]>,
   ) => {
@@ -1235,11 +1244,16 @@ export const db = {
 
   addContract: async (data: any) => {
     assertUniqueText(cache.contracts, 'contract_no', data.contract_no, '合同号');
+    const prepaymentRatio = Number(data.prepayment_ratio ?? 0.3);
+    if (!Number.isFinite(prepaymentRatio) || prepaymentRatio < 0 || prepaymentRatio > 1) {
+      throw new Error('约定预付款比例必须在 0% 到 100% 之间。');
+    }
     const contractCurrency = data.currency === 'RMB' ? 'RMB' : 'USD';
     const incoterm = contractCurrency === 'USD' ? (data.incoterm === 'CIF' ? 'CIF' : 'FOB') : null;
     const saved = await post<Contract>('contracts', {
       owner_id: ownerId(),
       ...data,
+      prepayment_ratio: prepaymentRatio,
       incoterm,
       contract_no: String(data.contract_no).trim(),
       contract_date: data.contract_date || null,
@@ -1255,6 +1269,9 @@ export const db = {
       assertUniqueText(cache.contracts, 'contract_no', data.contract_no, '合同号', id);
     }
     const current = cache.contracts.find((row) => row.id === id);
+    if (data.prepayment_ratio !== undefined && (!Number.isFinite(data.prepayment_ratio) || data.prepayment_ratio < 0 || data.prepayment_ratio > 1)) {
+      throw new Error('约定预付款比例必须在 0% 到 100% 之间。');
+    }
     const nextCurrency = data.currency || current?.currency || 'USD';
     await patch<Contract>(`contracts?id=eq.${id}`, {
       ...data,
@@ -1318,7 +1335,7 @@ export const db = {
       actual_warehousing_date: data.actual_warehousing_date || null,
       estimated_release_date: data.estimated_release_date || null,
       actual_release_date: data.actual_release_date || null,
-      aps_auto_query_enabled: data.business_type === '原料药' ? false : data.aps_auto_query_enabled,
+      aps_auto_query_enabled: false,
       reference_contact_sheet: data.reference_contact_sheet,
       notes: data.notes
     });
@@ -1346,7 +1363,6 @@ export const db = {
         throw new Error(`联系单号“${nextContactSheetNo}”已由${conflict.owner_display_name}用于合同 ${conflict.contract_no}，不能重复保存。`);
       }
     }
-    const nextBusinessType = data.business_type || oldSheet.business_type;
     const nextUnit = normalizeContactSheetUnit(data.unit || oldSheet.unit);
     if (!isAllowedContactSheetUnit(nextUnit)) {
       throw new Error('计量单位只能选择支、盒、瓶、kg或十亿。');
@@ -1363,7 +1379,7 @@ export const db = {
       ...(data.unit !== undefined ? { unit: nextUnit } : {}),
       ...(data.material_no !== undefined ? { material_no: data.material_no.trim() } : {}),
       ...(data.product_variant_id !== undefined ? { product_variant_id: data.product_variant_id || null } : {}),
-      ...(nextBusinessType === '原料药' ? { aps_auto_query_enabled: false } : {}),
+      aps_auto_query_enabled: false,
       ...(supportsPcsPerCarton && pcsPerCarton !== undefined ? { pcs_per_carton: pcsPerCarton } : {}),
       ...(data.packaging_profile_version_id !== undefined
         ? { packaging_profile_version_id: data.packaging_profile_version_id || null }
@@ -1466,8 +1482,6 @@ export const db = {
         batch_rows: batchList.map((row) => ({
           batch_no: String(row.batch_no).trim(),
           batch_quantity: row.batch_quantity,
-          production_date: row.production_date || null,
-          expiry_date: row.expiry_date || null,
           warehouse_date: row.warehouse_date || null,
           release_date: row.release_date || null,
           notes: row.notes || null
@@ -1496,11 +1510,10 @@ export const db = {
       payment_date: string;
       total_amount: number;
       currency: 'USD' | 'RMB';
-      payment_type: Payment['payment_type'];
       exchange_rate?: number;
       notes?: string;
     },
-    allocations: { contract_id: string; shipment_id?: string | null; amount: number; payment_type: PaymentType }[]
+    allocations: { contract_id: string; amount: number }[]
   ) => {
     assertPositiveNumber(data.total_amount, '收款总额');
     if (!cache.customers.some((row) => row.id === data.customer_id)) throw new Error('收款客户不存在，请刷新后重试。');
@@ -1510,7 +1523,6 @@ export const db = {
     if (contracts.some((contract) => contract?.currency !== data.currency)) throw new Error('合同币种必须与客户默认收款币种一致。');
     allocations.forEach((row) => {
       assertPositiveNumber(row.amount, '合同分摊金额');
-      if (!isPaymentType(row.payment_type)) throw new Error('请选择每条合同分摊的收款类型。');
     });
     const allocationTotal = allocations.reduce((sum, row) => sum + Number(row.amount), 0);
     if (allocationTotal > data.total_amount + 0.01) throw new Error('合同分摊合计不能超过收款总额。');
@@ -1525,7 +1537,7 @@ export const db = {
           exchange_rate: data.exchange_rate || null,
           notes: data.notes || null
         },
-        allocation_rows: allocations.map((row) => ({ ...row, shipment_id: row.shipment_id || null }))
+        allocation_rows: allocations
       })
     });
     await refreshAfterConfirmedWrite(true);
@@ -1533,21 +1545,20 @@ export const db = {
   },
   updatePaymentReceipt: async (
     receiptId: string,
-    data: { receipt_no?: string; payment_date: string; total_amount: number; currency: 'USD' | 'RMB'; payment_type: Payment['payment_type']; exchange_rate?: number; notes?: string; change_reason?: string },
-    allocations: { contract_id: string; shipment_id?: string | null; amount: number; payment_type: PaymentType }[]
+    data: { receipt_no?: string; payment_date: string; total_amount: number; currency: 'USD' | 'RMB'; exchange_rate?: number; notes?: string },
+    allocations: { contract_id: string; amount: number }[]
   ) => {
     const receipt = cache.paymentReceipts.find((row) => row.id === receiptId);
     if (!receipt) throw new Error('组合收款单不存在，请刷新后重试。');
     allocations.forEach((row) => {
       assertPositiveNumber(row.amount, '合同分摊金额');
-      if (!isPaymentType(row.payment_type)) throw new Error('请选择每条合同分摊的收款类型。');
     });
     const replacementId = await localRest<string>('rpc/update_payment_receipt_with_allocations', {
       method: 'POST',
       body: JSON.stringify({
         target_receipt_id: receiptId,
         receipt_data: { ...data, receipt_no: data.receipt_no?.trim() || null, exchange_rate: data.exchange_rate || null, notes: data.notes || null },
-        allocation_rows: allocations.map((row) => ({ ...row, shipment_id: row.shipment_id || null }))
+        allocation_rows: allocations
       })
     });
     await refreshAfterConfirmedWrite(true);
@@ -1572,12 +1583,6 @@ export const db = {
     assertPositiveNumber(data.amount, '收款金额');
     const contract = cache.contracts.find((row) => row.id === data.contract_id);
     if (!contract) throw new Error('收款关联的合同不存在，请刷新后重试。');
-    if (data.shipment_id) {
-      const shipment = cache.shipments.find((row) => row.id === data.shipment_id);
-      if (!shipment || shipment.contract_id !== contract.id) {
-        throw new Error('收款关联的发货记录不属于当前合同。');
-      }
-    }
     const exchangeRate = contract.currency === 'USD' && data.exchange_rate
       ? Number(data.exchange_rate)
       : null;
@@ -1587,7 +1592,8 @@ export const db = {
       ...data,
       currency: contract.currency,
       payment_date: data.payment_date || formatLocalDate(),
-      shipment_id: data.shipment_id || null,
+      allocation_effective_date: data.payment_date || formatLocalDate(),
+      shipment_id: null,
       exchange_rate: exchangeRate,
       amount_rmb: contract.currency === 'RMB'
         ? data.amount
@@ -1604,13 +1610,6 @@ export const db = {
     const contract = cache.contracts.find((row) => row.id === contractId);
     if (!current || !contract) throw new Error('收款记录或关联合同不存在，请刷新后重试。');
     const amount = data.amount ?? current.amount;
-    const linkedShipmentId = 'shipment_id' in data ? data.shipment_id : current.shipment_id;
-    if (linkedShipmentId) {
-      const linkedShipment = cache.shipments.find((row) => row.id === linkedShipmentId);
-      if (!linkedShipment || linkedShipment.contract_id !== contract.id) {
-        throw new Error('收款关联的发货记录不属于当前合同。');
-      }
-    }
     const exchangeRate = contract.currency === 'USD'
       ? (data.exchange_rate === undefined ? current.exchange_rate : data.exchange_rate)
       : null;
@@ -1618,10 +1617,11 @@ export const db = {
     await patch<Payment>(`payments?id=eq.${id}`, {
       contract_id: contract.id,
       payment_date: data.payment_date || current.payment_date,
+      allocation_effective_date: data.payment_date || current.payment_date,
       amount,
       currency: contract.currency,
       payment_type: data.payment_type || current.payment_type,
-      shipment_id: linkedShipmentId || null,
+      shipment_id: null,
       exchange_rate: exchangeRate,
       amount_rmb: contract.currency === 'RMB' ? amount : exchangeRate ? amount * exchangeRate : null,
       notes: data.notes === undefined ? current.notes : data.notes
@@ -1663,16 +1663,9 @@ export const db = {
 
     const contractStatuses = Array.from(grouped.entries()).map(([contractId, contractItems]) => {
       validateShipmentItems(contractId, contractItems);
-      const contract = cache.contracts.find((row) => row.id === contractId)!;
-      const totalShipmentAmount = contractItems.reduce((sum, item) => sum + item.shipped_quantity * item.unit_price, 0);
-      const contractPayments = cache.payments.filter((row) => row.contract_id === contract.id);
-      const totalPaid = contractPayments.reduce((sum, row) => sum + row.amount, 0);
-      const prepVal = contractPayments.filter((row) => row.payment_type === '预付款').reduce((sum, row) => sum + row.amount, 0);
-      const contractAmount = cache.contactSheets.filter((row) => row.contract_id === contract.id).reduce((sum, row) => sum + row.quantity * row.unit_price, 0);
-      const check = checkPaymentTermsBeforeShipment(contract.payment_terms, contractAmount, prepVal, totalPaid, totalShipmentAmount);
       return {
-        contract_id: contract.id,
-        payment_check_status: check.status === 'approved' ? '可发货' : check.status === 'rejected' ? '不建议发货' : '需人工确认'
+        contract_id: contractId,
+        payment_check_status: LEGACY_PAYMENT_CHECK_STATUS
       };
     });
 
@@ -1691,6 +1684,57 @@ export const db = {
     });
     await refreshAfterConfirmedWrite(true);
     return groupId;
+  },
+  updatePreparingShipmentGroup: async (
+    groupId: string,
+    groupData: { shipment_no: string; shipment_date: string; notes?: string },
+    items: { contact_sheet_id: string; batch_id: string; shipped_quantity: number; unit_price: number }[]
+  ) => {
+    const group = cache.shipmentGroups.find((row) => row.id === groupId);
+    if (!group) throw new Error('发货安排不存在，请刷新后重试。');
+    if (group.status !== '准备中') throw new Error('只有准备中的发货安排可以编辑。');
+    const number = String(groupData.shipment_no || '').trim();
+    if (!number) throw new Error('发货单号不能为空。');
+    if (cache.shipmentGroups.some((row) => row.id !== groupId && row.shipment_no.trim().toLocaleLowerCase() === number.toLocaleLowerCase())) {
+      throw new Error(`发货单号“${number}”已经存在。`);
+    }
+    if (!items.length) throw new Error('请至少保留一条发货明细。');
+
+    const contractItems = new Map<string, typeof items>();
+    items.forEach((item) => {
+      assertPositiveNumber(item.shipped_quantity, '发货数量');
+      assertPositiveNumber(item.unit_price, '发货单价');
+      const sheet = cache.contactSheets.find((row) => row.id === item.contact_sheet_id);
+      const contract = cache.contracts.find((row) => row.id === sheet?.contract_id);
+      if (!sheet || !contract || contract.customer_id !== group.customer_id || contract.currency !== group.currency || (contract.incoterm || null) !== (group.incoterm || null)) {
+        throw new Error('发货明细必须属于原客户、币种和贸易术语。');
+      }
+      const rows = contractItems.get(contract.id) || [];
+      rows.push(item);
+      contractItems.set(contract.id, rows);
+    });
+
+    const contractStatuses = Array.from(contractItems.keys()).map((contractId) => ({
+      contract_id: contractId,
+      payment_check_status: LEGACY_PAYMENT_CHECK_STATUS
+    }));
+
+    const result = await localRest<string>('rpc/update_preparing_shipment_group_with_items', {
+      method: 'POST',
+      body: JSON.stringify({
+        target_group_id: groupId,
+        group_data: { shipment_no: number, shipment_date: groupData.shipment_date || null, notes: groupData.notes || null },
+        item_rows: items.map((item) => ({
+          ...item,
+          batch_id: item.batch_id || null,
+          material_no: cache.contactSheets.find((row) => row.id === item.contact_sheet_id)?.material_no.trim() || '',
+          notes: '调整准备中发货安排'
+        })),
+        contract_status_rows: contractStatuses
+      })
+    });
+    await refreshAfterConfirmedWrite(true);
+    return result;
   },
   confirmShipmentGroupDispatched: async (
     groupId: string,
@@ -1718,19 +1762,10 @@ export const db = {
       contractItems.set(contract.id, rows);
     });
 
-    const contractStatuses = Array.from(contractItems.entries()).map(([contractId, contractRows]) => {
-      const contract = cache.contracts.find((row) => row.id === contractId)!;
-      const totalShipmentAmount = contractRows.reduce((sum, item) => sum + item.shipped_quantity * item.unit_price, 0);
-      const contractPayments = cache.payments.filter((row) => row.contract_id === contract.id);
-      const totalPaid = contractPayments.reduce((sum, row) => sum + row.amount, 0);
-      const prepVal = contractPayments.filter((row) => row.payment_type === '预付款').reduce((sum, row) => sum + row.amount, 0);
-      const contractAmount = cache.contactSheets.filter((row) => row.contract_id === contract.id).reduce((sum, row) => sum + row.quantity * row.unit_price, 0);
-      const check = checkPaymentTermsBeforeShipment(contract.payment_terms, contractAmount, prepVal, totalPaid, totalShipmentAmount);
-      return {
-        contract_id: contract.id,
-        payment_check_status: check.status === 'approved' ? '可发货' : check.status === 'rejected' ? '不建议发货' : '需人工确认'
-      };
-    });
+    const contractStatuses = Array.from(contractItems.keys()).map((contractId) => ({
+      contract_id: contractId,
+      payment_check_status: LEGACY_PAYMENT_CHECK_STATUS
+    }));
 
     const result = await localRest<string>('rpc/confirm_shipment_group_dispatched', {
       method: 'POST',
@@ -1751,8 +1786,23 @@ export const db = {
     return result;
   },
   deleteShipmentGroup: async (id: string) => {
-    await removeOne<ShipmentGroup>('shipment_groups', id, '合并发货记录');
+    await localRest<string>('rpc/delete_preparing_shipment_group', {
+      method: 'POST',
+      body: JSON.stringify({ target_group_id: id })
+    });
     await refreshAfterConfirmedWrite(true);
+  },
+  voidAndCopyShipmentGroup: async (id: string, replacementShipmentNo: string, replacementShipmentDate: string) => {
+    const replacementId = await localRest<string>('rpc/void_and_copy_shipment_group', {
+      method: 'POST',
+      body: JSON.stringify({
+        target_group_id: id,
+        replacement_shipment_no: replacementShipmentNo,
+        replacement_shipment_date: replacementShipmentDate
+      })
+    });
+    await refreshAfterConfirmedWrite(true);
+    return replacementId;
   },
 
   addShipment: async (shipmentData: any, items: { contact_sheet_id: string; batch_id: string; shipped_quantity: number; unit_price: number }[]) => {
@@ -1760,14 +1810,6 @@ export const db = {
     const contract = cache.contracts.find((row) => row.id === shipmentData.contract_id);
     if (!contract) throw new Error('发货记录关联的合同不存在，请刷新后重试。');
     validateShipmentItems(contract.id, items);
-    const totalShipmentAmount = items.reduce((sum, item) => sum + item.shipped_quantity * item.unit_price, 0);
-    let paymentStatus = '需人工确认';
-    const contractPayments = cache.payments.filter((row) => row.contract_id === contract.id);
-    const totalPaid = contractPayments.reduce((sum, row) => sum + row.amount, 0);
-    const prepVal = contractPayments.filter((row) => row.payment_type === '预付款').reduce((sum, row) => sum + row.amount, 0);
-    const contractAmount = cache.contactSheets.filter((row) => row.contract_id === contract.id).reduce((sum, row) => sum + row.quantity * row.unit_price, 0);
-    const check = checkPaymentTermsBeforeShipment(contract.payment_terms, contractAmount, prepVal, totalPaid, totalShipmentAmount);
-    paymentStatus = check.status === 'approved' ? '可发货' : check.status === 'rejected' ? '不建议发货' : '需人工确认';
     const savedShipmentId = await localRest<string>('rpc/create_shipment_with_items', {
       method: 'POST',
       body: JSON.stringify({
@@ -1775,7 +1817,7 @@ export const db = {
           ...shipmentData,
           shipment_no: String(shipmentData.shipment_no).trim(),
           shipment_date: shipmentData.shipment_date || null,
-          payment_check_status: paymentStatus
+          payment_check_status: LEGACY_PAYMENT_CHECK_STATUS
         },
         item_rows: items.map((item) => ({
           ...item,
@@ -1810,22 +1852,12 @@ export const db = {
       throw new Error('合并发货必须整单维护，不能单独修改其中一个合同的发货明细。请删除后重新创建整笔合并发货。');
     }
     validateShipmentItems(contract.id, items, shipmentId);
-    const totalShipmentAmount = items.reduce((sum, item) => sum + item.shipped_quantity * item.unit_price, 0);
-    let paymentStatus = shipment?.payment_check_status || '需人工确认';
-    if (contract) {
-      const contractPayments = cache.payments.filter((row) => row.contract_id === contract.id);
-      const totalPaid = contractPayments.reduce((sum, row) => sum + row.amount, 0);
-      const prepVal = contractPayments.filter((row) => row.payment_type === '预付款').reduce((sum, row) => sum + row.amount, 0);
-      const contractAmount = cache.contactSheets.filter((row) => row.contract_id === contract.id).reduce((sum, row) => sum + row.quantity * row.unit_price, 0);
-      const check = checkPaymentTermsBeforeShipment(contract.payment_terms, contractAmount, prepVal, totalPaid, totalShipmentAmount);
-      paymentStatus = check.status === 'approved' ? '可发货' : check.status === 'rejected' ? '不建议发货' : '需人工确认';
-    }
 
     await localRest<number>('rpc/replace_shipment_items', {
       method: 'POST',
       body: JSON.stringify({
         target_shipment_id: shipmentId,
-        target_payment_status: paymentStatus,
+        target_payment_status: LEGACY_PAYMENT_CHECK_STATUS,
         item_rows: items.map((item) => ({
           ...item,
           batch_id: item.batch_id || null,
@@ -1848,16 +1880,6 @@ export const db = {
     assertUniqueText(cache.shipments, 'shipment_no', data.shipment_no, '发货单号', shipmentId);
     validateShipmentItems(contract.id, items, shipmentId, data.status);
 
-    const totalShipmentAmount = items.reduce((sum, item) => sum + item.shipped_quantity * item.unit_price, 0);
-    const contractPayments = cache.payments.filter((row) => row.contract_id === contract.id);
-    const totalPaid = contractPayments.reduce((sum, row) => sum + row.amount, 0);
-    const prepVal = contractPayments.filter((row) => row.payment_type === '预付款').reduce((sum, row) => sum + row.amount, 0);
-    const contractAmount = cache.contactSheets
-      .filter((row) => row.contract_id === contract.id)
-      .reduce((sum, row) => sum + row.quantity * row.unit_price, 0);
-    const check = checkPaymentTermsBeforeShipment(contract.payment_terms, contractAmount, prepVal, totalPaid, totalShipmentAmount);
-    const paymentStatus = check.status === 'approved' ? '可发货' : check.status === 'rejected' ? '不建议发货' : '需人工确认';
-
     await localRest<number>('rpc/update_shipment_with_items', {
       method: 'POST',
       body: JSON.stringify({
@@ -1868,7 +1890,7 @@ export const db = {
           status: data.status,
           notes: data.notes
         },
-        target_payment_status: paymentStatus,
+        target_payment_status: LEGACY_PAYMENT_CHECK_STATUS,
         item_rows: items.map((item) => ({
           ...item,
           batch_id: item.batch_id || null,
@@ -2011,7 +2033,7 @@ export const db = {
   saveExchangeRates: async (rates: ExchangeRate[]) => {
     try {
       await waitForAll(rates.map((rate) => post<ExchangeRate>('exchange_rates?on_conflict=owner_id,effective_month,currency_pair', {
-        owner_id: PUBLIC_EXCHANGE_RATE_OWNER_ID,
+        owner_id: ownerId(),
         effective_month: rate.effective_month,
         currency_pair: rate.currency_pair,
         rate: rate.rate,

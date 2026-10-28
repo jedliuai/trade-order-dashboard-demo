@@ -26,8 +26,12 @@ import {
   hasDuplicateContractNumber,
 } from '../services/contractFormRules';
 import { sortCustomersForDisplay } from '../services/customerOrdering';
+import { sortContractsByCustomerAndContractNumber } from '../services/customerOrderingSort';
 import { resolveBoxArtworkReminder } from '../services/boxArtworkReminder';
-import { Plus, Edit2, Trash2, FileText, X, Copy, RefreshCw, Truck, CreditCard, Users, FileDown } from 'lucide-react';
+import { calculatePrepaymentMilestone } from '../services/paymentProgress';
+import { loadPackagingVersions, type PackagingProfileVersion } from '../services/masterDataService';
+import { summarizeContractVolume } from '../services/contractVolume';
+import { Plus, Edit2, Trash2, FileText, X, Copy, RefreshCw, Truck, CreditCard, Users, FileDown, Boxes } from 'lucide-react';
 
 interface ContractsProps {
   onRefreshData: () => void;
@@ -47,6 +51,9 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [packagingVersions, setPackagingVersions] = useState<PackagingProfileVersion[]>([]);
+  const [packagingVersionsError, setPackagingVersionsError] = useState('');
+  const [isPackagingVersionsLoading, setIsPackagingVersionsLoading] = useState(true);
 
   // Form states
   const [contractNo, setContractNo] = useState('');
@@ -65,7 +72,6 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [operationError, setOperationError] = useState('');
-
   useEffect(() => {
     const highlight = sessionStorage.getItem('highlight_contract_no');
     if (highlight) {
@@ -90,6 +96,25 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
 
   const { contractsList, customersList, sheetsList, paymentsList, shipmentsList, invoicesList, shipmentItemsList } = data;
   const incotermLocked = Boolean(editingId && shipmentsList.some((shipment) => shipment.contract_id === editingId && shipment.status !== '取消'));
+
+  useEffect(() => {
+    let active = true;
+    setIsPackagingVersionsLoading(true);
+    setPackagingVersionsError('');
+    void loadPackagingVersions()
+      .then((rows) => {
+        if (active) setPackagingVersions(rows);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setPackagingVersions([]);
+        setPackagingVersionsError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (active) setIsPackagingVersionsLoading(false);
+      });
+    return () => { active = false; };
+  }, [onRefreshTrigger]);
 
   useEffect(() => {
     const contractId = sessionStorage.getItem('open_contract_detail_id');
@@ -119,10 +144,8 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
       const shippedQuantity = sheets.reduce((sum, s) => sum + (s.shipped_quantity || 0), 0);
       const shippingRate = totalQuantity > 0 ? Math.min(100, Math.round((shippedQuantity / totalQuantity) * 100)) : 0;
 
-      const prepaymentDate = payments
-        .filter(p => p.payment_type === '预付款' && p.payment_date)
-        .map(p => p.payment_date)
-        .sort()[0] || '';
+      const prepaymentMilestone = calculatePrepaymentMilestone(contract, totalAmount, payments);
+      const prepaymentDate = prepaymentMilestone.reachedDate;
 
       // Delivery due date logic: max(prepaymentDate, packagingConfirmedDate) + deliveryDays
       let dueDate = contract.agreed_delivery_date || '';
@@ -181,12 +204,8 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
   }, [processedContracts, activeTab, searchQuery, dateFrom, dateTo]);
   const displayedContracts = useMemo(() => {
     if (!groupByCustomer) return filteredContracts;
-    const customerPositions = new Map(sortCustomersForDisplay(customersList).map((customer, index) => [customer.id, index]));
-    return [...filteredContracts].sort((left, right) => {
-      const customerDiff = (customerPositions.get(left.customer_id) ?? Number.MAX_SAFE_INTEGER)
-        - (customerPositions.get(right.customer_id) ?? Number.MAX_SAFE_INTEGER);
-      return customerDiff || right.contract_date.localeCompare(left.contract_date);
-    });
+    const orderedCustomerIds = sortCustomersForDisplay(customersList).map((customer) => customer.id);
+    return sortContractsByCustomerAndContractNumber(filteredContracts, orderedCustomerIds);
   }, [customersList, filteredContracts, groupByCustomer]);
   const contractPage = usePagedRows(displayedContracts, `${activeTab}|${searchQuery}|${dateFrom}|${dateTo}|${groupByCustomer}`);
 
@@ -204,6 +223,10 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
 
     return { contract, sheets, payments, shipments };
   }, [selectedContractId, processedContracts, sheetsList, paymentsList, shipmentsList]);
+  const selectedContractVolume = useMemo(
+    () => summarizeContractVolume(selectedContractDetail?.sheets || [], packagingVersions),
+    [selectedContractDetail, packagingVersions]
+  );
 
   const handleOpenAdd = () => {
     const defaultCustomer = customersList[0];
@@ -290,6 +313,10 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contractNo.trim() || !customerId || !destinationCountry.trim()) return;
+    if (!Number.isFinite(prepaymentRatio) || prepaymentRatio < 0 || prepaymentRatio > 1) {
+      setOperationError('约定预付款比例必须在 0% 到 100% 之间。');
+      return;
+    }
 
     if (hasDuplicateContractNumber(contractsList, contractNo, editingId)) {
       const message = `合同号“${contractNo.trim()}”已经存在，无法保存。请检查合同号，或修改复制合同末尾的数字。`;
@@ -386,7 +413,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
     event.stopPropagation();
     setExportingHelperContractId(contract.id);
     try {
-      const result = await db.runLocalExport('export-helper', {
+      const result = await db.runWorkerExport('export-helper', {
         contract_id: contract.id,
         contract_no: contract.contract_no
       }) as {
@@ -424,6 +451,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
     setDateFrom(range.startDate);
     setDateTo(range.endDate);
   };
+
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -493,7 +521,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
           size="sm"
           icon={<Users className="h-4 w-4" />}
         >
-          {groupByCustomer ? '返回日期排序' : '按客户分组查看'}
+          {groupByCustomer ? '按录入时间查看' : '按客户分组查看'}
         </Button>
       </div>
       {operationError && (
@@ -576,8 +604,8 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                     <div className="mt-0.5 font-semibold text-ink">{c.currency === 'USD' ? '$' : '￥'}{c.totalPaid.toLocaleString()} <span className="text-[10px] font-medium text-muted">({c.recoveryRate}%)</span></div>
                   </div>
                   <div className="rounded-lg border border-border/80 bg-surface px-3 py-2.5">
-                    <div className="text-[10px] text-muted">已发货</div>
-                    <div className="mt-0.5 font-semibold text-ink">{c.shippedQuantity.toLocaleString()} / {c.totalQuantity.toLocaleString()} <span className="text-[10px] font-medium text-muted">({c.shippingRate}%)</span></div>
+                    <div className="text-[10px] text-muted">剩余尾款</div>
+                    <div className="mt-0.5 font-semibold text-ink">{c.currency === 'USD' ? '$' : '￥'}{c.unpaid.toLocaleString()} <span className="text-[10px] font-medium text-muted">({Math.max(0, 100 - c.recoveryRate)}%)</span></div>
                   </div>
                   <div className="rounded-lg border border-border/80 bg-surface px-3 py-2.5">
                     <div className="text-[10px] text-muted">合同应交期</div>
@@ -686,7 +714,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                     required
                     value={contractNo}
                     onChange={(e) => setContractNo(e.target.value)}
-                    placeholder="如 DEMONL04"
+                    placeholder="如 25RYNL04"
                     className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200"
                   />
                 </div>
@@ -816,15 +844,41 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-slate-400">付款条件说明</label>
-                <input
-                  type="text"
-                  value={paymentTerms}
-                  onChange={(e) => setPaymentTerms(e.target.value)}
-                  placeholder="如 30% 预付 + 70% 发货前付清"
-                  className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200"
-                />
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+                <div className="space-y-1">
+                  <label className="text-slate-400">付款条件说明</label>
+                  <input
+                    type="text"
+                    value={paymentTerms}
+                    onChange={(e) => setPaymentTerms(e.target.value)}
+                    placeholder="如 30% 预付 + 70% 发货前付清"
+                    className="w-full bg-slate-900/60 border border-white/[0.06] rounded-lg px-3.5 py-2.5 text-slate-200"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="prepayment-ratio" className="text-slate-400">约定预付款比例</label>
+                  <div className="relative">
+                    <input
+                      id="prepayment-ratio"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      list="prepayment-ratio-options"
+                      value={Math.round(prepaymentRatio * 10000) / 100}
+                      onChange={(event) => setPrepaymentRatio(Number(event.target.value) / 100)}
+                      className="w-full rounded-lg border border-white/[0.06] bg-slate-900/60 px-3.5 py-2.5 pr-8 text-right text-slate-200"
+                    />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">%</span>
+                    <datalist id="prepayment-ratio-options">
+                      <option value="0" />
+                      <option value="30" />
+                      <option value="40" />
+                      <option value="100" />
+                    </datalist>
+                  </div>
+                  <p className="text-[10px] leading-relaxed text-slate-500">累计回款首次达到该比例时，系统自动确认预付款达标日。</p>
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -929,6 +983,10 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                   <span className="text-slate-500">预收款收到期:</span>
                   <span className="text-white">{selectedContractDetail.contract.prepaymentDate || '未收到'}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">约定预付款:</span>
+                  <span className="text-white">{(selectedContractDetail.contract.prepayment_ratio * 100).toLocaleString()}%</span>
+                </div>
               </div>
 
               <div className="p-4 rounded-xl bg-white/[0.01] border border-white/[0.04] space-y-2 md:border-l-2 md:border-l-brand-cyan/20">
@@ -946,6 +1004,49 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                   <span className="text-brand-cyan font-bold">{selectedContractDetail.contract.dueDate || '待预付或确认包装'}</span>
                 </div>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] p-4 text-xs">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Boxes className="h-4 w-4 text-brand-cyan" />
+                  <div>
+                    <div className="font-heading text-sm font-semibold text-white">合同体积概览</div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">按全部联系单的包装资料与发货比例估算</div>
+                  </div>
+                </div>
+                {!isPackagingVersionsLoading && !packagingVersionsError && !selectedContractVolume.isComplete && (
+                  <span className="rounded-md border border-brand-amber/25 bg-brand-amber/10 px-2 py-1 text-[10px] font-semibold text-brand-amber">
+                    待录入
+                  </span>
+                )}
+              </div>
+
+              {isPackagingVersionsLoading ? (
+                <div className="mt-3 rounded-lg border border-white/[0.05] bg-white/[0.02] px-3 py-3 text-slate-400">体积数据读取中…</div>
+              ) : packagingVersionsError ? (
+                <div className="mt-3 rounded-lg border border-brand-amber/20 bg-brand-amber/5 px-3 py-3 text-brand-amber">体积数据暂不可用</div>
+              ) : selectedContractVolume.isComplete ? (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {[
+                    { label: '总体积', value: selectedContractVolume.totalVolumeM3 },
+                    { label: '已发货体积', value: selectedContractVolume.shippedVolumeM3 },
+                    { label: '剩余货物体积', value: selectedContractVolume.remainingVolumeM3 }
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-lg border border-white/[0.05] bg-white/[0.02] px-3 py-2.5">
+                      <div className="text-[10px] text-slate-500">{item.label}</div>
+                      <div className="mt-0.5 font-heading text-base font-bold text-white">
+                        {item.value.toLocaleString('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m³
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-lg border border-brand-amber/20 bg-brand-amber/5 px-3 py-3 text-brand-amber">
+                  待录入全部联系单的包装体积资料后显示
+                  {selectedContractVolume.missingSheetCount > 0 && `（还差 ${selectedContractVolume.missingSheetCount} 张联系单）`}
+                </div>
+              )}
             </div>
 
             {/* Tabs for Lists (Contact Sheets / Payments / Shipments) */}
@@ -1054,7 +1155,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                           </div>
                           {boxArtworkStatus.due && (
                             <div className="mt-2 inline-flex items-center rounded-md border border-brand-rose/30 bg-brand-rose/10 px-2 py-1 text-[10px] font-bold text-brand-rose">
-                              请确认盒子版式 · 提醒日 {boxArtworkStatus.reminderDate} · {sheet.aps_scheduled_date}
+                              请确认盒子版式 · 提醒日 {boxArtworkStatus.reminderDate} · 排产 {sheet.aps_scheduled_date}
                             </div>
                           )}
                         </div>
@@ -1135,7 +1236,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                     selectedContractDetail.payments.map(p => (
                       <div key={p.id} className="p-2.5 rounded bg-white/[0.02] border border-white/[0.04] flex justify-between items-center">
                         <div>
-                          <span className="font-semibold text-slate-300">{p.payment_type}</span>
+                          <span className="font-semibold text-slate-300">已到账</span>
                           <div className="text-[9px] text-slate-500">{p.payment_date}</div>
                         </div>
                         <span className="font-bold text-slate-200">
