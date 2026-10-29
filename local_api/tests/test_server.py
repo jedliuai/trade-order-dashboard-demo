@@ -1,6 +1,7 @@
 """HTTP boundaries: exercise real sockets and an isolated SQLite file."""
 import http.client
 import importlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -93,3 +94,73 @@ class ServerBoundaryTest(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/reset', {'confirm': 'NO'})[0], 400)
         self.assertEqual(self.request('POST', '/api/reset', {'confirm': 'RESET_DEMO'}, {'X-Demo-User': 'demo-owner'})[0], 403)
         self.assertEqual(json.loads(self.request('GET', '/api/backup')[2])['customers'], [])
+
+    def populate_organization(self):
+        return {f'demo-sales-{n}': self.store.insert('customers', {'name': f'虚构区域客户{n}'}, user=f'demo-sales-{n}')[0] for n in range(1, 5)}
+
+    def test_region_and_owner_drilldown_are_enforced_by_http_for_every_read_route(self):
+        self.populate_organization()
+        expected = {'demo-sales-1': 1, 'demo-sales-4': 1, 'demo-manager': 2, 'demo-manager-2': 2, 'demo-owner': 4}
+        for actor, count in expected.items():
+            with self.subTest(actor=actor):
+                headers = {'X-Demo-User': actor}
+                for route in ('/api/bootstrap', '/api/backup'):
+                    code, _, body = self.request('GET', route, headers=headers)
+                    self.assertEqual(code, 200)
+                    self.assertEqual(len(json.loads(body)['customers']), count)
+                body = self.request('GET', '/api/health', headers=headers)[2]
+                self.assertEqual(json.loads(body)['counts']['customers'], count)
+                body = self.request('GET', '/api/data/customers', headers=headers)[2]
+                self.assertEqual(len(json.loads(body)), count)
+        for actor, scope, count in [('demo-owner', 'demo-manager-2', 2), ('demo-owner', 'demo-sales-4', 1), ('demo-manager', 'demo-sales-2', 1)]:
+            headers = {'X-Demo-User': actor, 'X-Demo-Scope': scope}
+            body = self.request('GET', '/api/bootstrap', headers=headers)[2]
+            self.assertEqual(len(json.loads(body)['customers']), count)
+        for actor, scope in [('demo-sales-1', 'demo-sales-2'), ('demo-manager', 'demo-manager-2'), ('demo-manager', 'demo-sales-3'), ('demo-manager-2', 'demo-owner'), ('demo-owner', 'unknown')]:
+            headers = {'X-Demo-User': actor, 'X-Demo-Scope': scope}
+            self.assertEqual(self.request('GET', '/api/bootstrap', headers=headers)[0], 403)
+
+    def test_manager_viewing_salesperson_remains_readonly_and_cannot_modify_any_record(self):
+        customers = self.populate_organization()
+        before = self.store.snapshot()
+        for actor, scope in [('demo-manager', 'demo-sales-1'), ('demo-manager-2', 'demo-sales-4'), ('demo-owner', 'demo-sales-2')]:
+            headers = {'X-Demo-User': actor, 'X-Demo-Scope': scope}
+            cid = customers[scope]['id']
+            for method, route, payload in [
+                ('POST', '/api/data/customers', {'name': '禁止新增'}),
+                ('PATCH', '/api/data/customers?id=eq.' + cid, {'notes': '禁止修改'}),
+                ('DELETE', '/api/data/customers?id=eq.' + cid, {}),
+                ('POST', '/api/data/rpc/refresh_alerts', {}),
+                ('POST', '/api/reset', {'confirm': 'RESET_DEMO'}),
+            ]:
+                self.assertEqual(self.request(method, route, payload, headers)[0], 403)
+        self.assertEqual(self.store.snapshot(), before)
+        own = customers['demo-sales-4']['id']
+        headers = {'X-Demo-User': 'demo-sales-4'}
+        self.assertEqual(self.request('PATCH', '/api/data/customers?id=eq.' + own, {'notes': '本人保存'}, headers)[0], 200)
+        self.assertEqual(self.request('PATCH', '/api/data/customers?id=eq.' + customers['demo-sales-3']['id'], {'notes': '越权'}, headers)[0], 409)
+        self.assertEqual(self.store.query('customers', {'id': 'eq.' + own}, user='demo-sales-4')[0]['notes'], '本人保存')
+
+    def test_export_and_metrics_cannot_escape_current_region_or_selected_salesperson(self):
+        customers = self.populate_organization()
+        for owner, customer in customers.items():
+            self.store.insert('contracts', {'contract_no': '虚构-' + owner, 'customer_id': customer['id'], 'currency': 'USD', 'export_type': '自营', 'incoterm': 'FOB', 'contract_date': '2026-10-29'}, user=owner)
+        from openpyxl import load_workbook
+        for actor, scope, expected in [('demo-manager', 'demo-manager', {1, 2}), ('demo-owner', 'demo-manager-2', {3, 4}), ('demo-owner', 'demo-sales-4', {4})]:
+            headers = {'X-Demo-User': actor, 'X-Demo-Scope': scope}
+            code, _, content = self.request('POST', '/api/export/export-original-contracts', {}, headers)
+            self.assertEqual(code, 200)
+            workbook = load_workbook(io.BytesIO(content))
+            cells = ' '.join(str(cell.value) for row in workbook.active for cell in row)
+            for n in range(1, 5):
+                self.assertEqual(f'虚构区域客户{n}' in cells, n in expected)
+        self.assertEqual(self.request('POST', '/api/data/rpc/get_operating_metrics', {'p_start_date': '2026-10-01', 'p_end_date': '2026-10-29', 'p_owner_id': 'demo-sales-4'}, {'X-Demo-User': 'demo-manager'})[0], 403)
+
+    def test_member_reset_preserves_every_other_owners_records(self):
+        customers = self.populate_organization()
+        untouched = {t: [r for r in rs if r['owner_id'] != 'demo-sales-1'] for t, rs in self.store.snapshot().items()}
+        code, _, _ = self.request('POST', '/api/reset', {'confirm': 'RESET_DEMO'})
+        self.assertEqual(code, 200)
+        after = {t: [r for r in rs if r['owner_id'] != 'demo-sales-1'] for t, rs in self.store.snapshot().items()}
+        self.assertEqual(after, untouched)
+        self.assertEqual(self.store.query('customers', user='demo-sales-2')[0]['id'], customers['demo-sales-2']['id'])

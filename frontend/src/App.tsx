@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { initDataStore, db } from './services/dataStore';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { OrganizationScope } from './components/OrganizationScope';
 import { lazy, Suspense } from 'react';
 import { formatLocalMonth } from './services/dateUtils';
 import { LoaderCircle } from 'lucide-react';
@@ -219,6 +220,7 @@ function App() {
 
         {/* Dynamic page contents wrapper */}
         <main className="mt-14 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 2xl:p-8">
+          <OrganizationScope onRefreshData={handleRefreshData} />
           {accountIdentity?.isReadOnly && (
             <div role="status" className="mb-5 rounded-lg border border-brand-cyan/25 bg-brand-cyan/10 px-4 py-3 text-xs text-brand-cyan">
               {IS_PUBLIC_DEMO

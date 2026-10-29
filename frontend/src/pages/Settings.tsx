@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Database, Download, RefreshCw, Send, ShieldCheck, ArrowRightLeft, Trash2 } from 'lucide-react';
 import { db, initDataStore } from '../services/dataStore';
-import { localRequest, downloadLocalFile, getCurrentAccountIdentity, DEMO_ACCOUNTS, getLocalSession, IS_PUBLIC_DEMO, setDemoAccount } from '../services/localClient';
+import { localRequest, downloadLocalFile, getCurrentAccountIdentity, DEMO_ACCOUNTS, getLocalSession, getScopeAccounts, IS_PUBLIC_DEMO, setDemoAccount } from '../services/localClient';
 import { formatLocalDate, formatLocalMonth } from '../services/dateUtils';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -63,8 +63,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
   };
   const reset = async () => {
     const accepted = await confirm({
-      title:'重置本地演示数据？',
-      message:'当前数据库将先备份到 data/backups/，然后恢复为虚构演示种子。你在演示中新增、修改的数据会从当前工作库移除，可从备份恢复。',
+      title:'重置本人演示数据？',
+      message:'先在本机保存完整备份，再恢复你本人负责的虚构样例。你在演示中新增、修改的个人业务会被移除，其他业务员的数据和公共产品、汇率不受影响。',
       confirmLabel:'备份并重置',tone:'danger',
     });
     if (!accepted) return;
@@ -104,25 +104,31 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
     {error && <div role="alert" className="rounded-xl border border-brand-rose/30 bg-brand-rose/10 p-4 text-sm text-brand-rose">{error}</div>}
     {tab==='local' && <div role="tabpanel" id="settings-panel-local" aria-labelledby="settings-tab-local" className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        {Object.entries(countLabels).map(([key,label]) => <div key={key} className={panelClass}><div className="text-xs text-muted">{label} · 全库</div><div className="mt-2 text-3xl font-semibold text-ink">{(counts[key] || 0).toLocaleString()}</div></div>)}
+        {Object.entries(countLabels).map(([key,label]) => <div key={key} className={panelClass}><div className="text-xs text-muted">{label} · 当前查看范围</div><div className="mt-2 text-3xl font-semibold text-ink">{(counts[key] || 0).toLocaleString()}</div></div>)}
       </div>
       <section className={panelClass}>
         <h2 className="flex items-center gap-2 font-semibold text-ink"><ShieldCheck className="h-5 w-5 text-brand-emerald"/>演示身份</h2>
-        <p className="mt-3 text-sm leading-6 text-muted">业务员看个人业务，经理和负责人查看汇总。这里只模拟汇报层级，不连接任何真实账号；公网版本中的所有身份均为只读。</p>
+        <p className="mt-3 text-sm leading-6 text-muted">老板 → 区域负责人 → 业务员。业务员仅可查看和编辑本人业务；区域负责人只读查看本区域及下属；老板只读查看全公司、各区域和各业务员。顶部身份切换用于演示角色，页面的查看范围只切换数据，不改变当前身份的权限。</p>
         <select aria-label="设置演示身份" className={`mt-4 ${inputClass}`} value={getLocalSession().user.id} onChange={event=>{setDemoAccount(event.target.value);window.location.reload();}}>
           {DEMO_ACCOUNTS.map(account=><option key={account.id} value={account.id}>{account.name}</option>)}
         </select>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {getScopeAccounts(getLocalSession().user.id).filter(account => account.role === 'leader').map(account => <div key={account.id} className="rounded-xl border border-border bg-surface-muted p-4 text-xs">
+            <div className="font-semibold text-ink">{account.name} · 只读</div>
+            <div className="mt-2 space-y-1 text-muted">{DEMO_ACCOUNTS.filter(child => child.parentId === account.id).map(child => <div key={child.id}>↳ {child.name} · {child.role === 'member' ? '本人业务可编辑' : '只读'}</div>)}</div>
+          </div>)}
+        </div>
       </section>
       <section className={panelClass}>
         <h2 className="font-semibold text-ink">{IS_PUBLIC_DEMO ? '公网快照与隔离说明' : '持久化、备份与重置'}</h2>
         <p className="mt-3 text-sm leading-7 text-muted">{IS_PUBLIC_DEMO
           ? '公网站点使用随部署生成的虚构数据快照，不连接 NAS、家庭网络或生产系统。访客不能下载全库备份或重置共享数据；业务报表导出仍可在导出中心体验。'
-          : <>工作数据库：<code>data/demo.sqlite3</code>；虚构种子：<code>data/demo-seed.json</code>。刷新页面或重启应用不会丢失已保存数据。重置前会自动保存数据库备份；导出的 JSON 包含全库快照，请妥善保管。</>}
+          : <>数据保存在本机 SQLite；刷新页面或重启不会丢失已保存数据。下载的 JSON 仅包含当前授权查看范围。业务员可重置本人演示业务，执行前自动保存完整本地备份。</>}
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           {!IS_PUBLIC_DEMO && <Button disabled={busy} tone="secondary" icon={<Download className="h-4 w-4"/>} onClick={()=>void run(async()=>{await downloadLocalFile('backup',{},'演示数据备份.json');})}>下载 JSON 备份</Button>}
           <Button disabled={busy} tone="secondary" icon={<RefreshCw className="h-4 w-4"/>} onClick={()=>void run(async()=>{await initDataStore(true);onRefreshData();})}>{IS_PUBLIC_DEMO ? '重新读取演示快照' : '重新读取数据库'}</Button>
-          {!IS_PUBLIC_DEMO && <Button disabled={busy || identity.isReadOnly} tone="danger" onClick={()=>void reset()}>备份并重置演示数据</Button>}
+          {!IS_PUBLIC_DEMO && !identity.isReadOnly && <Button disabled={busy} tone="danger" onClick={()=>void reset()}>备份并重置本人演示数据</Button>}
         </div>
       </section>
     </div>}
@@ -149,7 +155,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
         </select>
         <div className="mt-5 flex flex-wrap gap-3">
           <Button disabled={busy} tone="secondary" onClick={()=>void preview()}>生成汇报预览</Button>
-          <Button disabled={busy || !report || !telegram?.configured || !telegram.recipients?.[recipient]} icon={<Send className="h-4 w-4"/>} onClick={()=>void send()}>确认并发送</Button>
+          <Button disabled={identity.isReadOnly || busy || !report || !telegram?.configured || !telegram.recipients?.[recipient]} icon={<Send className="h-4 w-4"/>} onClick={()=>void send()}>确认并发送</Button>
         </div>
       </section>
       <section className={panelClass}><h2 className="font-semibold text-ink">汇报预览</h2><pre className="mt-4 min-h-80 whitespace-pre-wrap break-words text-sm leading-7 text-body">{report || '选择周期和接收人，点击“生成汇报预览”。预览不会发送消息。'}</pre></section>

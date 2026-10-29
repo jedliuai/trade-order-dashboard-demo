@@ -991,7 +991,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ onNavigate, onRefreshTrigg
             >
               {showAdvancedFilters ? '隐藏多维筛选' : '展开多维筛选'}
             </Button>
-            <Button
+            <Button requiresEdit
               onClick={() => {
                 setTemplateError('');
                 setShowSaveTemplateModal(true);
@@ -1753,7 +1753,7 @@ export const Analytics: React.FC<AnalyticsProps> = ({ onNavigate, onRefreshTrigg
               >
                 取消
               </Button>
-              <Button
+              <Button requiresEdit
                 onClick={() => void handleSaveTemplate()}
                 disabled={isSavingTemplate || !newTemplateName.trim()}
               >

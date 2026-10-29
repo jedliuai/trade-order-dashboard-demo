@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { isReadOnlySession } from '../services/localClient';
 
 type ButtonTone = 'primary' | 'secondary' | 'subtle' | 'warning' | 'danger';
 type ButtonSize = 'sm' | 'md' | 'lg';
@@ -9,6 +10,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: ButtonTone;
   size?: ButtonSize;
   fullWidth?: boolean;
+  requiresEdit?: boolean;
 }
 
 const toneClasses: Record<ButtonTone, string> = {
@@ -31,15 +33,20 @@ export function Button({
   tone = 'primary',
   size = 'md',
   fullWidth = false,
+  requiresEdit = false,
   type = 'button',
   className = '',
   ...props
 }: ButtonProps) {
+  const blocked = requiresEdit && isReadOnlySession();
   return (
     <button
       type={type}
       className={`inline-flex shrink-0 items-center justify-center gap-2 border font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${sizeClasses[size]} ${toneClasses[tone]} ${fullWidth ? 'w-full' : ''} ${className}`}
       {...props}
+      disabled={props.disabled || blocked}
+      data-edit-action={requiresEdit || undefined}
+      title={blocked ? '当前身份只读，请由所属业务员维护业务' : props.title}
     >
       {icon}
       {children}

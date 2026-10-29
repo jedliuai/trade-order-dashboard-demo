@@ -1074,7 +1074,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
   const renderShipmentActions = (shipment: (typeof shipmentPage.rows)[number], compact = false) => (
     <div className={compact ? 'flex flex-wrap justify-start gap-2' : 'flex min-w-max justify-end gap-1.5 whitespace-nowrap'}>
       {shipment.status === '准备中' && shipment.shipment_group_id && (
-        <Button
+        <Button requiresEdit
           onClick={() => handleOpenEdit(shipment.id)}
           tone="secondary"
           size="sm"
@@ -1097,7 +1097,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         </Button>
       )}
       {shipment.status === '准备中' && shipment.shipment_group_id && (
-        <Button
+        <Button requiresEdit
           onClick={() => handleOpenDispatch(shipment.id)}
           size="sm"
           icon={<Truck className="h-3.5 w-3.5" />}
@@ -1106,7 +1106,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         </Button>
       )}
       {(shipment.invoice_state === 'pending' || shipment.invoice_state === 'invoiced') && (
-        <Button
+        <Button requiresEdit
           onClick={() => handleOpenInvoice(shipment.id)}
           tone={shipment.invoice_state === 'invoiced' ? 'secondary' : 'subtle'}
           size="sm"
@@ -1127,11 +1127,11 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
         </Button>
       )}
       {shipment.status === '已发货' && (
-        <IconButton onClick={() => void handleVoidAndCopy(shipment.id)} label="作废并复制为新安排" tone="danger" icon={<RotateCcw className="h-3.5 w-3.5" />} />
+        <IconButton requiresEdit onClick={() => void handleVoidAndCopy(shipment.id)} label="作废并复制为新安排" tone="danger" icon={<RotateCcw className="h-3.5 w-3.5" />} />
       )}
       <IconButton onClick={() => handleOpenDetails(shipment.id)} label="核对发货明细" icon={<Eye className="h-3.5 w-3.5" />} />
       {shipment.status === '准备中' && shipment.shipment_group_id && (
-        <IconButton onClick={() => handleDelete(shipment.id)} label="删除发货安排" tone="danger" icon={<Trash2 className="h-3.5 w-3.5" />} />
+        <IconButton requiresEdit onClick={() => handleDelete(shipment.id)} label="删除发货安排" tone="danger" icon={<Trash2 className="h-3.5 w-3.5" />} />
       )}
     </div>
   );
@@ -1150,7 +1150,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
           >
             导出发货明细 (Excel)
           </Button>
-          <Button
+          <Button requiresEdit
             onClick={handleOpenAdd}
             icon={<Plus className="w-4 h-4" />}
           >
@@ -1553,7 +1553,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
                   <div className="flex items-center justify-end gap-3">
                     {operationError && <div className="mr-auto text-xs text-brand-rose">{operationError}</div>}
                     <Button type="button" onClick={() => setShowAddModal(false)} tone="secondary">取消</Button>
-                    <Button type="submit" disabled={isSaving || !customerId || shipmentDraftSummary.totalShippedQuantity === 0}>
+                    <Button requiresEdit type="submit" disabled={isSaving || !customerId || shipmentDraftSummary.totalShippedQuantity === 0}>
                       {isSaving ? '保存并生成中...' : editingShipmentGroupId ? '保存安排并重新导出 Excel' : '创建安排并导出 Excel'}
                     </Button>
                   </div>
@@ -1600,7 +1600,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
               </div>
               <footer className="flex shrink-0 items-center justify-end gap-3 border-t border-border bg-surface px-6 py-4">
                 <Button type="button" tone="secondary" onClick={() => setShowDispatchModal(false)} disabled={isDispatchSaving}>取消</Button>
-                <Button type="submit" icon={<Truck className="h-4 w-4" />} disabled={isDispatchSaving || !dispatchDate}>
+                <Button requiresEdit type="submit" icon={<Truck className="h-4 w-4" />} disabled={isDispatchSaving || !dispatchDate}>
                   {isDispatchSaving ? '确认中…' : '确认实际发货'}
                 </Button>
               </footer>
@@ -1689,14 +1689,14 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
                 <div>
                   {editingInvoiceId && (
-                    <Button type="button" onClick={handleRevokeInvoice} tone="danger" size="sm" disabled={isInvoiceSaving}>
+                    <Button requiresEdit type="button" onClick={handleRevokeInvoice} tone="danger" size="sm" disabled={isInvoiceSaving}>
                       撤销开票
                     </Button>
                   )}
                 </div>
                 <div className="flex gap-3">
                   <Button type="button" onClick={() => setShowInvoiceModal(false)} tone="secondary" disabled={isInvoiceSaving}>取消</Button>
-                  <Button type="submit" disabled={isInvoiceSaving || !invoiceDate} icon={<ReceiptText className="h-4 w-4" />}>
+                  <Button requiresEdit type="submit" disabled={isInvoiceSaving || !invoiceDate} icon={<ReceiptText className="h-4 w-4" />}>
                     {isInvoiceSaving ? '处理中…' : editingInvoiceId ? '保存开票信息' : '确认已经开票'}
                   </Button>
                 </div>

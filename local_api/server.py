@@ -9,6 +9,7 @@ import sqlite3
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from .store import ApiError, SALES, Store, check_user
+from .organization import resolve_scope
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BODY = 1_048_576
@@ -61,6 +62,7 @@ def make_server(store, port=8765, env_path=None, static_dir=None):
                 raise ApiError('拒绝跨站请求', 403)
             self.user = self.headers.get('X-Demo-User', SALES[0])
             check_user(self.user)
+            self.scope = resolve_scope(self.user, self.headers.get('X-Demo-Scope'))
 
         def read_body(self):
             if self.headers.get('Transfer-Encoding'):
@@ -119,14 +121,16 @@ def make_server(store, port=8765, env_path=None, static_dir=None):
                 params = query if method == 'GET' else payload
                 if not isinstance(params, dict):
                     raise ApiError('动作参数必须是 JSON 对象')
-                self.send_json(200, store.rpc(name, params, self.user))
+                # A manager viewing a salesperson never acquires write rights.
+                actor = self.scope if name in READ_ACTIONS else self.user
+                self.send_json(200, store.rpc(name, params, actor))
                 return
             if path.startswith('/api/data/'):
                 table = path.removeprefix('/api/data/')
                 if not re.fullmatch(r'[a-z][a-z0-9_]*', table):
                     raise ApiError('无效数据表', 404)
                 if method == 'GET':
-                    self.send_json(200, store.query(table, query, self.user))
+                    self.send_json(200, store.query(table, query, self.scope))
                 elif method == 'POST':
                     self.send_json(201, store.insert(table, payload, query, self.user))
                 elif method == 'PATCH':
@@ -140,22 +144,23 @@ def make_server(store, port=8765, env_path=None, static_dir=None):
                 # One database snapshot avoids decoding the full graph once per
                 # table/page, and ensures the UI never combines different writes.
                 from .metrics import shipment_profits
-                snapshot = store.snapshot(self.user)
+                snapshot = store.snapshot(self.scope)
                 self.send_json(200, {**snapshot, 'v_shipment_profit': shipment_profits(snapshot)})
             elif path == '/api/health' and method == 'GET':
-                snapshot = store.snapshot()
-                self.send_json(200, {'status': 'ok', 'counts': {t: len(rows) for t, rows in snapshot.items()}})
+                snapshot = store.snapshot(self.scope)
+                self.send_json(200, {'status': 'ok', 'app': 'trade-order-dashboard-demo',
+                                     'mode': 'local', 'counts': {t: len(rows) for t, rows in snapshot.items()}})
             elif path == '/api/backup' and method == 'GET':
-                self.send_json(200, store.snapshot(), '演示数据备份.json')
+                self.send_json(200, store.snapshot(self.scope), '当前查看范围演示数据.json')
             elif path == '/api/reset' and method == 'POST':
                 if not isinstance(payload, dict):
                     raise ApiError('重置参数必须是 JSON 对象')
-                self.send_json(200, store.reset(payload.get('confirm'), self.user))
+                self.send_json(200, store.reset(payload.get('confirm'), self.user, owner_only=True))
             elif path.startswith('/api/export/') and method == 'POST':
                 from .exports import export_file
                 if not isinstance(payload, dict):
                     raise ApiError('导出筛选必须是 JSON 对象')
-                name, mime, content = export_file(store, path.removeprefix('/api/export/'), payload, self.user)
+                name, mime, content = export_file(store, path.removeprefix('/api/export/'), payload, self.scope)
                 self.send_bytes(200, content, mime, name)
             elif path == '/api/telegram/status' and method == 'GET':
                 from .telegram import status
@@ -164,7 +169,7 @@ def make_server(store, port=8765, env_path=None, static_dir=None):
                 from .telegram import preview, send
                 if not isinstance(payload, dict):
                     raise ApiError('汇报参数必须是 JSON 对象')
-                result = (preview(store, payload, user=self.user) if path.endswith('/preview')
+                result = (preview(store, payload, user=self.scope) if path.endswith('/preview')
                           else send(store, payload, user=self.user, env_path=config_path))
                 self.send_json(200, result)
             else:

@@ -86,7 +86,7 @@ export function ProductOrderManager({ products, onSaved }: ProductOrderManagerPr
           <h3 className="font-heading text-base font-bold text-ink">产品展示顺序</h3>
           <p className="mt-1 text-[11px] leading-5 text-muted">顺序保存到共享数据库，供产品选择和包装模板维护统一使用；不会改变产品主键、规格或历史业务关联。</p>
         </div>
-        <Button tone="secondary" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => void resetOrder()} disabled={isSaving}>
+        <Button requiresEdit tone="secondary" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => void resetOrder()} disabled={isSaving}>
           恢复默认顺序
         </Button>
       </div>
@@ -105,10 +105,10 @@ export function ProductOrderManager({ products, onSaved }: ProductOrderManagerPr
                 <span className="block truncate text-sm font-medium text-ink">{product.chinese_name}</span>
                 <span className="block truncate text-[10px] text-muted">{product.product_code} · {product.dosage_form || '未填写剂型'} · {product.variants.length} 个规格</span>
               </span>
-              <IconButton label={`直接置顶 ${product.chinese_name}`} icon={<ArrowUpToLine className="h-3.5 w-3.5" />} onClick={() => moveProductToEdge(product.id, 'top')} disabled={isSaving || absoluteIndex <= 0} />
-              <IconButton label={`上移 ${product.chinese_name}`} icon={<ArrowUp className="h-3.5 w-3.5" />} onClick={() => moveProduct(product.id, -1)} disabled={isSaving || absoluteIndex <= 0} />
-              <IconButton label={`下移 ${product.chinese_name}`} icon={<ArrowDown className="h-3.5 w-3.5" />} onClick={() => moveProduct(product.id, 1)} disabled={isSaving || absoluteIndex >= orderedProducts.length - 1} />
-              <IconButton label={`直接移到底部 ${product.chinese_name}`} icon={<ArrowDownToLine className="h-3.5 w-3.5" />} onClick={() => moveProductToEdge(product.id, 'bottom')} disabled={isSaving || absoluteIndex >= orderedProducts.length - 1} />
+              <IconButton requiresEdit label={`直接置顶 ${product.chinese_name}`} icon={<ArrowUpToLine className="h-3.5 w-3.5" />} onClick={() => moveProductToEdge(product.id, 'top')} disabled={isSaving || absoluteIndex <= 0} />
+              <IconButton requiresEdit label={`上移 ${product.chinese_name}`} icon={<ArrowUp className="h-3.5 w-3.5" />} onClick={() => moveProduct(product.id, -1)} disabled={isSaving || absoluteIndex <= 0} />
+              <IconButton requiresEdit label={`下移 ${product.chinese_name}`} icon={<ArrowDown className="h-3.5 w-3.5" />} onClick={() => moveProduct(product.id, 1)} disabled={isSaving || absoluteIndex >= orderedProducts.length - 1} />
+              <IconButton requiresEdit label={`直接移到底部 ${product.chinese_name}`} icon={<ArrowDownToLine className="h-3.5 w-3.5" />} onClick={() => moveProductToEdge(product.id, 'bottom')} disabled={isSaving || absoluteIndex >= orderedProducts.length - 1} />
             </div>
           );
         })}

@@ -11,7 +11,11 @@ import json
 from pathlib import Path
 from random import Random
 
-from .store import SALES, SHARED, TABLES, normalize_validate
+from .store import SHARED, TABLES, normalize_validate
+
+# Keep the original load-test generator stable; the current demo supplies its
+# own organization after copying the fictional shared catalog.
+SALES = ('demo-sales-1', 'demo-sales-2', 'demo-sales-3')
 
 
 def _month(value, offset=0):

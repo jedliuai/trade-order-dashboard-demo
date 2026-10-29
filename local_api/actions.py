@@ -2,10 +2,11 @@
 import copy
 import inspect
 
-from .store import ApiError, SALES, USERS, check_user, iso_date
+from .store import ApiError, check_user, iso_date
 from .action_common import trimmed
 from . import action_shipments as shipments, action_finance as finance, action_master as master
 from .action_alerts import refresh_alerts
+from .organization import descendants
 
 
 WRITES = {fn.__name__: fn for fn in (
@@ -27,7 +28,7 @@ WRITES = {fn.__name__: fn for fn in (
 
 
 def get_operating_metrics(store, user, p_start_date, p_end_date, p_owner_id=None):
-    if p_owner_id is not None and (p_owner_id not in USERS or (user in SALES and p_owner_id != user)):
+    if p_owner_id is not None and p_owner_id not in descendants(user):
         raise ApiError('无权查看所选账号的经营指标', 403)
     if iso_date(p_start_date) > iso_date(p_end_date):
         raise ApiError('开始日期不能晚于结束日期')

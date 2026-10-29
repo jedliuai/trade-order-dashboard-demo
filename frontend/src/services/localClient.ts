@@ -1,11 +1,17 @@
 /** Local demo identities are presentation scopes, not production authentication. */
-export const DEMO_ACCOUNTS = [
-  { id: 'demo-sales-1', name: '业务员 · 林晓（演示）', role: 'member' },
-  { id: 'demo-sales-2', name: '业务员 · 陈晨（演示）', role: 'member' },
-  { id: 'demo-sales-3', name: '业务员 · 周宁（演示）', role: 'member' },
-  { id: 'demo-manager', name: '销售经理（演示）', role: 'leader' },
-  { id: 'demo-owner', name: '公司负责人（演示）', role: 'leader' },
-] as const;
+import organization from '../data/demoOrganization.json' with { type: 'json' };
+export type DemoAccount = { id: string; name: string; role: 'member' | 'leader'; parentId: string | null; region: string; level: string };
+export const DEMO_ACCOUNTS = organization as DemoAccount[];
+
+export function getScopeAccounts(actorId: string): DemoAccount[] {
+  const allowed = new Set([actorId]);
+  let previous = 0;
+  while (previous !== allowed.size) {
+    previous = allowed.size;
+    for (const account of DEMO_ACCOUNTS) if (account.parentId && allowed.has(account.parentId)) allowed.add(account.id);
+  }
+  return DEMO_ACCOUNTS.filter(account => allowed.has(account.id));
+}
 
 export const IS_PUBLIC_DEMO = import.meta.env?.VITE_PUBLIC_DEMO === 'true';
 
@@ -17,7 +23,7 @@ export type AccountIdentity = { loginName: string; displayName: string; role: 'm
 
 export function getLocalSession(): DemoSession {
   const id = typeof window === 'undefined' ? null : window.localStorage.getItem(accountKey);
-  const account = DEMO_ACCOUNTS.find(item => item.id === id) || DEMO_ACCOUNTS[0];
+  const account = DEMO_ACCOUNTS.find(item => item.id === id) || DEMO_ACCOUNTS.find(item => item.id === 'demo-sales-1')!;
   return { user: { id: account.id, email: `${account.id}@example.invalid`, app_metadata: {
     app_role: account.role, login_name: account.id, display_name: account.name,
   } } };
@@ -27,6 +33,29 @@ export function setDemoAccount(id: string) {
   if (!DEMO_ACCOUNTS.some(item => item.id === id)) throw new Error('无效的演示身份。');
   window.localStorage.setItem(accountKey, id);
   window.dispatchEvent(new Event('demo-account-changed'));
+}
+
+export function getDemoScope(actorId = getLocalSession().user.id): DemoAccount {
+  const stored = typeof window === 'undefined' ? null : window.localStorage.getItem(`trade-demo-scope:${actorId}`);
+  return getScopeAccounts(actorId).find(account => account.id === stored) || DEMO_ACCOUNTS.find(account => account.id === actorId)!;
+}
+
+export function setDemoScope(id: string) {
+  const actorId = getLocalSession().user.id;
+  if (!getScopeAccounts(actorId).some(account => account.id === id)) throw new Error('无权查看所选区域或业务员。');
+  window.localStorage.setItem(`trade-demo-scope:${actorId}`, id);
+}
+
+export function getAccountPath(id: string): DemoAccount[] {
+  const path: DemoAccount[] = [];
+  const seen = new Set<string>();
+  let current = DEMO_ACCOUNTS.find(account => account.id === id);
+  while (current && !seen.has(current.id)) {
+    path.unshift(current);
+    seen.add(current.id);
+    current = DEMO_ACCOUNTS.find(account => account.id === current!.parentId);
+  }
+  return path;
 }
 
 export function getCurrentAccountIdentity(session = getLocalSession()): AccountIdentity {
@@ -55,8 +84,16 @@ function apiPath(path: string) {
 
 export async function localResponse(path: string, init: RequestInit = {}): Promise<Response> {
   const url = apiPath(path);
+  const method = (init.method || 'GET').toUpperCase();
+  const readActions = ['get_operating_metrics', 'get_global_contact_sheet_number_conflict', 'get_global_contract_number_conflict', 'get_global_batch_number_conflicts'];
+  const readRequest = ['GET', 'HEAD'].includes(method) || (method === 'POST' && (
+    path.startsWith('export/') || path === 'telegram/preview' ||
+    readActions.some(action => path === `data/rpc/${action}`)
+  ));
+  if (isReadOnlySession() && !readRequest) throw new Error('当前身份只读，请由所属业务员维护业务。');
   const headers = new Headers(init.headers);
   headers.set('X-Demo-User', getLocalSession().user.id);
+  headers.set('X-Demo-Scope', getDemoScope().id);
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   let response: Response;
   try { response = await fetch(url, { ...init, headers, credentials: 'same-origin' }); }

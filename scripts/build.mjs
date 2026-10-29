@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, realpath, rename } from 'node:fs/promises';
+import { lstat, mkdtemp, realpath, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,7 +39,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       cwd: root, stdio: 'inherit', windowsHide: true,
     });
     child.once('error', reject);
-    child.once('exit', (code, signal) => code === 0 && !signal ? resolve() : reject(Error(`Vite 构建失败（${signal || code}）`)));
+    child.once('exit', (code, signal) => {
+      if (code !== 0 || signal) { reject(Error(`Vite 构建失败（${signal || code}）`)); return; }
+      writeFile(path.join(staging, 'build-mode.json'), JSON.stringify({ mode: process.env.VITE_PUBLIC_DEMO === 'true' ? 'public' : 'local' }))
+        .then(resolve, reject);
+    });
   })).then(backup => {
     if (backup) console.log(`已保留上一版构建：${path.basename(backup)}（忽略 Git，可在停止服务后手工清理）`);
   }).catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -17,8 +17,7 @@ import sqlite3
 import unicodedata
 import uuid
 
-SALES = ('demo-sales-1', 'demo-sales-2', 'demo-sales-3')
-USERS = (*SALES, 'demo-manager', 'demo-owner')
+from .organization import SALES, USERS, descendants
 SHARED = 'demo-shared'
 TABLES = (
     'customers', 'contracts', 'contact_sheets', 'batches', 'shipments',
@@ -101,13 +100,16 @@ def check_user(user, write=False):
     if user not in USERS:
         raise ApiError('未知演示角色', 403, 'forbidden')
     if write and user not in SALES:
-        raise ApiError('经理和老板为只读演示角色', 403, 'read_only_role')
+        raise ApiError('区域负责人和老板只能查看，业务编辑由所属业务员完成', 403, 'read_only_role')
 
 
 def visible(row, user, table=''):
     if table == 'user_ui_preferences':
         return row.get('owner_id') == user
-    return row.get('owner_id') in ({user, SHARED} if user in SALES else {*USERS, SHARED})
+    allowed = descendants(user)
+    if table == 'app_user_profiles':
+        return row.get('user_id') in allowed
+    return row.get('owner_id') in allowed | {SHARED}
 
 
 def normalize_identity(text):
@@ -504,7 +506,7 @@ class Store:
         from .actions import dispatch
         return dispatch(self, name, params or {}, user)
 
-    def reset(self, confirm, user=SALES[0]):
+    def reset(self, confirm, user=SALES[0], *, owner_only=False):
         check_user(user, True)
         if confirm != 'RESET_DEMO':
             raise ApiError('重置需要 confirm=RESET_DEMO')
@@ -512,6 +514,9 @@ class Store:
             conn.execute('BEGIN IMMEDIATE')
             before = self.load(conn)
             replacement = self.read_seed()
+            if owner_only:
+                replacement = {table: [r for r in before[table] if r['owner_id'] != user] +
+                               [r for r in replacement[table] if r['owner_id'] == user] for table in TABLES}
             normalize_validate(replacement)
             directory = self.path.parent / 'backups'
             directory.mkdir(parents=True, exist_ok=True)
@@ -522,7 +527,8 @@ class Store:
                 import os
                 os.fsync(handle.fileno())
             self.persist(conn, replacement)
-        return {'status': 'ok', 'backup_path': str(backup), 'counts': {t: len(v) for t, v in replacement.items()}}
+        return {'status': 'ok', 'backup_path': str(backup),
+                'counts': {t: sum(not owner_only or visible(r, user, t) for r in v) for t, v in replacement.items()}}
 
 
 def normalize_validate(rows, before=None):

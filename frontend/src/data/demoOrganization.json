@@ -1,0 +1,9 @@
+[
+  {"id":"demo-owner","name":"老板 · 顾远（演示）","role":"leader","parentId":null,"region":"公司","level":"老板"},
+  {"id":"demo-manager","name":"东区负责人 · 许晴（演示）","role":"leader","parentId":"demo-owner","region":"东区","level":"区域负责人"},
+  {"id":"demo-sales-1","name":"东区业务员 · 林晓（演示）","role":"member","parentId":"demo-manager","region":"东区","level":"业务员"},
+  {"id":"demo-sales-2","name":"东区业务员 · 陈晨（演示）","role":"member","parentId":"demo-manager","region":"东区","level":"业务员"},
+  {"id":"demo-manager-2","name":"西区负责人 · 苏禾（演示）","role":"leader","parentId":"demo-owner","region":"西区","level":"区域负责人"},
+  {"id":"demo-sales-3","name":"西区业务员 · 周宁（演示）","role":"member","parentId":"demo-manager-2","region":"西区","level":"业务员"},
+  {"id":"demo-sales-4","name":"西区业务员 · 沈安（演示）","role":"member","parentId":"demo-manager-2","region":"西区","level":"业务员"}
+]

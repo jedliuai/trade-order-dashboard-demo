@@ -276,7 +276,7 @@ export const Batches: React.FC<BatchesProps> = ({ onNavigate, onRefreshData, onR
                             <span className="text-[11px] text-muted">放行 {batch.release_date || '—'}</span>
                             {tracking.risks.filter((risk) => risk.severity >= 2).map((risk) => <StatusBadge key={risk.label} tone={risk.tone}>{risk.label}</StatusBadge>)}
                           </div>
-                          {!isEditing && <Button onClick={() => handleStartEdit(batch)} tone="secondary" size="sm" icon={<Edit2 className="h-3.5 w-3.5" />}>单独调整</Button>}
+                          {!isEditing && <Button requiresEdit onClick={() => handleStartEdit(batch)} tone="secondary" size="sm" icon={<Edit2 className="h-3.5 w-3.5" />}>单独调整</Button>}
                         </div>
                         {isEditing && (
                           <div className="mt-3 rounded-xl border border-brand-cyan/20 bg-surface p-4">
@@ -284,7 +284,7 @@ export const Batches: React.FC<BatchesProps> = ({ onNavigate, onRefreshData, onR
                               <label className="space-y-1 text-[11px] font-medium text-muted"><span>实际入库日期</span><input type="date" value={warehouseDate} onChange={(event) => { setWarehouseDate(event.target.value); setEditError(''); }} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink" /></label>
                               <label className="space-y-1 text-[11px] font-medium text-muted"><span>实际放行日期</span><input type="date" value={releaseDate} onChange={(event) => { setReleaseDate(event.target.value); setEditError(''); }} className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink" aria-invalid={Boolean(editError) || undefined} /></label>
                               <label className="space-y-1 text-[11px] font-medium text-muted"><span>备注说明</span><input type="text" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="仅记录该批次的特殊情况" className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink" /></label>
-                              <div className="flex justify-end gap-2"><IconButton onClick={() => void handleSaveEdit(batch)} label="保存批次日期" tone="success" icon={<Check className="h-4 w-4" />} /><IconButton onClick={() => { setEditingId(null); setEditError(''); }} label="取消编辑批次" icon={<X className="h-4 w-4" />} /></div>
+                              <div className="flex justify-end gap-2"><IconButton requiresEdit onClick={() => void handleSaveEdit(batch)} label="保存批次日期" tone="success" icon={<Check className="h-4 w-4" />} /><IconButton onClick={() => { setEditingId(null); setEditError(''); }} label="取消编辑批次" icon={<X className="h-4 w-4" />} /></div>
                             </div>
                             {editError && <p role="alert" className="mt-2 text-[11px] font-medium text-brand-rose">{editError}</p>}
                           </div>

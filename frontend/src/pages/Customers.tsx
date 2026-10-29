@@ -216,7 +216,7 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
         title="客户主数据"
         description="统一维护客户档案和当前账号的客户展示顺序"
         actions={activeSection === 'profiles' ? (
-          <Button
+          <Button requiresEdit
             onClick={handleOpenAdd}
             icon={<Plus className="h-4 w-4" />}
           >
@@ -351,12 +351,12 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
                     tone="warning"
                     icon={<GitMerge className="w-3.5 h-3.5" />}
                   />
-                  <IconButton
+                  <IconButton requiresEdit
                     onClick={() => handleOpenEdit(customer)}
                     label={`编辑客户：${customer.name}`}
                     icon={<Edit2 className="w-3.5 h-3.5" />}
                   />
-                  <IconButton
+                  <IconButton requiresEdit
                     onClick={() => handleDelete(customer.id)}
                     label={`删除客户：${customer.name}`}
                     tone="danger"
@@ -491,7 +491,7 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
                 >
                   取消
                 </Button>
-                <Button
+                <Button requiresEdit
                   type="submit"
                   disabled={isSaving}
                 >
@@ -553,7 +553,7 @@ export const Customers: React.FC<CustomersProps> = ({ onRefreshData, onRefreshTr
 
             <div className="flex justify-end gap-3">
               <Button tone="secondary" onClick={() => setMergeSourceId('')} disabled={isMerging}>取消</Button>
-              <Button tone="danger" onClick={handleMerge} disabled={isMerging || !mergeTargetId} icon={<GitMerge className="h-4 w-4" />}>
+              <Button requiresEdit tone="danger" onClick={handleMerge} disabled={isMerging || !mergeTargetId} icon={<GitMerge className="h-4 w-4" />}>
                 {isMerging ? '正在合并…' : '迁移关联并合并'}
               </Button>
             </div>

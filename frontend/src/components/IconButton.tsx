@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { isReadOnlySession } from '../services/localClient';
 
 type IconButtonTone = 'neutral' | 'primary' | 'warning' | 'danger' | 'success';
 
@@ -7,6 +8,7 @@ interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 
   icon: ReactNode;
   tone?: IconButtonTone;
   size?: 'sm' | 'md' | 'lg';
+  requiresEdit?: boolean;
 }
 
 const toneClasses: Record<IconButtonTone, string> = {
@@ -29,16 +31,20 @@ export function IconButton({
   tone = 'neutral',
   size = 'sm',
   type = 'button',
+  requiresEdit = false,
   className = '',
   ...props
 }: IconButtonProps) {
+  const blocked = requiresEdit && isReadOnlySession();
   return (
     <button
       type={type}
       aria-label={label}
-      title={label}
       className={`inline-flex shrink-0 items-center justify-center border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${sizeClasses[size]} ${toneClasses[tone]} ${className}`}
       {...props}
+      disabled={props.disabled || blocked}
+      data-edit-action={requiresEdit || undefined}
+      title={blocked ? '当前身份只读，请由所属业务员维护业务' : props.title || label}
     >
       {icon}
       <span className="sr-only">{label}</span>

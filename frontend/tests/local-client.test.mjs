@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localRest, localRequest, setDemoAccount, getLocalSession, getCurrentAccountIdentity, downloadFileName } from '../src/services/localClient.ts';
+import { localRest, localRequest, setDemoAccount, getLocalSession, getCurrentAccountIdentity, getScopeAccounts, getDemoScope, setDemoScope, getAccountPath, downloadFileName } from '../src/services/localClient.ts';
 
 const storage = new Map();
 globalThis.window = { localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) }, dispatchEvent() {} };
@@ -27,10 +27,52 @@ test('unknown identities cannot be persisted and leadership is read-only', () =>
   assert.equal(getCurrentAccountIdentity().isReadOnly, false);
 });
 
+test('hierarchy scopes include only descendants and narrowing never grants editing', async () => {
+  setDemoAccount('demo-owner');
+  assert.equal(getScopeAccounts('demo-owner').length, 7);
+  setDemoScope('demo-sales-4');
+  assert.equal(getDemoScope().id, 'demo-sales-4');
+  assert.equal(getCurrentAccountIdentity().isReadOnly, true);
+  assert.deepEqual(getAccountPath('demo-sales-4').map(a => a.id), ['demo-owner', 'demo-manager-2', 'demo-sales-4']);
+  const originalFetch = globalThis.fetch;
+  let headers;
+  globalThis.fetch = async (_url, options) => { headers = new Headers(options.headers); return Response.json({}); };
+  try { await localRequest('bootstrap'); } finally { globalThis.fetch = originalFetch; }
+  assert.equal(headers.get('X-Demo-User'), 'demo-owner');
+  assert.equal(headers.get('X-Demo-Scope'), 'demo-sales-4');
+  setDemoAccount('demo-manager');
+  assert.deepEqual(getScopeAccounts('demo-manager').map(a => a.id), ['demo-manager', 'demo-sales-1', 'demo-sales-2']);
+  assert.throws(() => setDemoScope('demo-sales-4'), /无权/);
+  setDemoScope('demo-sales-1');
+  assert.equal(getCurrentAccountIdentity().isReadOnly, true);
+  setDemoAccount('demo-sales-4');
+  assert.throws(() => setDemoScope('demo-sales-3'), /无权/);
+  assert.equal(getCurrentAccountIdentity().isReadOnly, false);
+  setDemoAccount('demo-sales-1');
+});
+
 test('client refuses remote or path-traversal endpoints before fetching', async () => {
   for (const path of ['https://example.com', '//example.com', '../private', 'data/../../secret']) {
     await assert.rejects(localRequest(path), /本地接口/);
   }
+});
+
+test('leadership blocks writes before fetch but permits preview, metrics and exports', async () => {
+  setDemoAccount('demo-owner');
+  setDemoScope('demo-sales-1');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return Response.json({}); };
+  try {
+    for (const [path, method] of [['data/customers', 'POST'], ['data/contracts?id=eq.c', 'PATCH'], ['data/customers?id=eq.c', 'DELETE'], ['data/rpc/refresh_alerts', 'POST'], ['reset', 'POST']]) {
+      await assert.rejects(localRequest(path, { method, body: '{}' }), /只读/);
+    }
+    assert.equal(calls, 0);
+    for (const path of ['export/export-payments', 'telegram/preview', 'data/rpc/get_operating_metrics']) {
+      await localRequest(path, { method: 'POST', body: '{}' });
+    }
+    assert.equal(calls, 3);
+  } finally { globalThis.fetch = originalFetch; setDemoAccount('demo-sales-1'); }
 });
 
 test('server validation errors are shown rather than treated as successful writes', async () => {

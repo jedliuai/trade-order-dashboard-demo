@@ -1,3 +1,4 @@
+import { isReadOnlySession } from '../services/localClient';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, Edit2, PackageSearch, Plus, RotateCcw, Search, X, XCircle } from 'lucide-react';
 import { Button } from '../components/Button';
@@ -238,7 +239,7 @@ export function ProductMasterData() {
       <PageHeader
         title="产品主数据"
         description="统一维护中英文正式名、剂型、业务别名与规格；联系单与包装模板共用同一套产品基础资料。"
-        actions={<div className="flex gap-2"><Button tone="secondary" icon={<ArrowUpDown className="h-4 w-4" />} onClick={() => setShowOrderManager(true)}>调整展示顺序</Button><Button icon={<Plus className="h-4 w-4" />} onClick={openCreate}>新增产品</Button></div>}
+        actions={<div className="flex gap-2"><Button requiresEdit tone="secondary" icon={<ArrowUpDown className="h-4 w-4" />} onClick={() => setShowOrderManager(true)}>调整展示顺序</Button><Button requiresEdit icon={<Plus className="h-4 w-4" />} onClick={openCreate}>新增产品</Button></div>}
       />
 
       <div className="grid gap-3 rounded-xl border border-brand-emerald/15 bg-brand-emerald/5 p-4 text-xs leading-5 text-muted md:grid-cols-2">
@@ -286,7 +287,7 @@ export function ProductMasterData() {
             <div className="col-span-2 flex flex-wrap content-start gap-1.5 lg:col-span-1"><div className="w-full text-[10px] font-semibold text-subtle lg:hidden">启用规格</div>{product.variants.filter((item) => item.specification && item.status === '启用').slice(0, 5).map((item) => <span key={item.id} className="rounded border border-brand-blue/15 bg-brand-blue/5 px-2 py-0.5 text-[10px] text-brand-blue">{item.specification}</span>)}{product.variants.filter((item) => item.specification && item.status === '启用').length > 5 && <span className="text-[10px] text-subtle">+{product.variants.filter((item) => item.specification && item.status === '启用').length - 5}</span>}{!product.variants.some((item) => item.specification && item.status === '启用') && <span className="text-xs text-subtle">尚无启用规格</span>}</div>
             <div><div className="mb-1 text-[10px] font-semibold text-subtle lg:hidden">联系单引用</div><strong className="text-ink">{product.contact_sheet_count}</strong><span className="ml-1 text-xs text-muted">张</span><div className="mt-1 text-[10px] text-subtle">{product.contact_row_count} 条记录</div></div>
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => openEdit(product)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:border-brand-cyan/40 hover:text-brand-cyan" aria-label="编辑产品"><Edit2 className="h-4 w-4" /></button>
+              <button data-edit-action disabled={isReadOnlySession()} type="button" onClick={() => openEdit(product)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted transition hover:border-brand-cyan/40 hover:text-brand-cyan" aria-label="编辑产品"><Edit2 className="h-4 w-4" /></button>
             </div>
           </div>
         )) : (
@@ -329,7 +330,7 @@ export function ProductMasterData() {
                   <div className="mt-4 space-y-3">
                     <div className="flex gap-2">
                       <input value={newSpecification} onChange={(event) => setNewSpecification(event.target.value)} placeholder="输入新规格，例如 1g" className={inputClass} disabled={variantBusy} />
-                      <Button onClick={() => void addSpecification()} icon={<Plus className="h-4 w-4" />} disabled={variantBusy || !newSpecification.trim()}>新增规格</Button>
+                      <Button requiresEdit onClick={() => void addSpecification()} icon={<Plus className="h-4 w-4" />} disabled={variantBusy || !newSpecification.trim()}>新增规格</Button>
                     </div>
                     <div className="overflow-hidden rounded-lg border border-brand-blue/15 bg-surface">
                       {editing.variants.filter((variant) => variant.specification).sort((left, right) => Number(right.status === '启用') - Number(left.status === '启用') || left.specification.localeCompare(right.specification)).map((variant) => (
@@ -340,7 +341,7 @@ export function ProductMasterData() {
                             <div className="min-w-0 flex-1"><strong className={variant.status === '启用' ? 'text-ink' : 'text-subtle line-through'}>{variant.specification}</strong><span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${variant.status === '启用' ? 'bg-brand-emerald/10 text-brand-emerald' : 'bg-surface-muted text-subtle'}`}>{variant.status}</span></div>
                           )}
                           <div className="flex shrink-0 gap-2">
-                            {editingVariantId === variant.id ? <><Button size="sm" onClick={() => void reviseSpecification(variant)} disabled={variantBusy || !editingSpecification.trim()}>保存修正</Button><Button size="sm" tone="secondary" onClick={() => { setEditingVariantId(null); setEditingSpecification(''); }} disabled={variantBusy}>取消</Button></> : <><Button size="sm" tone="secondary" icon={<Edit2 className="h-3.5 w-3.5" />} onClick={() => { setEditingVariantId(variant.id); setEditingSpecification(variant.specification); }}>修正</Button><Button size="sm" tone="secondary" icon={variant.status === '启用' ? <XCircle className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />} onClick={() => void toggleSpecification(variant)}>{variant.status === '启用' ? '停用' : '重新启用'}</Button></>}
+                            {editingVariantId === variant.id ? <><Button requiresEdit size="sm" onClick={() => void reviseSpecification(variant)} disabled={variantBusy || !editingSpecification.trim()}>保存修正</Button><Button size="sm" tone="secondary" onClick={() => { setEditingVariantId(null); setEditingSpecification(''); }} disabled={variantBusy}>取消</Button></> : <><Button requiresEdit size="sm" tone="secondary" icon={<Edit2 className="h-3.5 w-3.5" />} onClick={() => { setEditingVariantId(variant.id); setEditingSpecification(variant.specification); }}>修正</Button><Button requiresEdit size="sm" tone="secondary" icon={variant.status === '启用' ? <XCircle className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />} onClick={() => void toggleSpecification(variant)}>{variant.status === '启用' ? '停用' : '重新启用'}</Button></>}
                           </div>
                         </div>
                       ))}
@@ -351,7 +352,7 @@ export function ProductMasterData() {
               </section>
               {error && <div role="alert" className="rounded-lg border border-brand-rose/25 bg-brand-rose/8 px-3 py-2 text-xs text-brand-rose">{error}</div>}
             </div>
-            <div className="flex justify-end gap-3 border-t border-border px-6 py-4"><Button tone="secondary" onClick={() => setShowForm(false)} disabled={isSaving}>取消</Button><Button type="submit" disabled={isSaving}>{isSaving ? '保存中…' : '确认保存'}</Button></div>
+            <div className="flex justify-end gap-3 border-t border-border px-6 py-4"><Button tone="secondary" onClick={() => setShowForm(false)} disabled={isSaving}>取消</Button><Button requiresEdit type="submit" disabled={isSaving}>{isSaving ? '保存中…' : '确认保存'}</Button></div>
           </form>
         </Dialog>
       )}

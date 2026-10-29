@@ -637,7 +637,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
           <td className="hidden p-4 lg:table-cell"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${(row.deposit_amount > 0.005 && !row.allocations.length) || (singleAllocation && singleAllocation.contract_total <= 0.005) ? 'border-brand-amber/25 bg-brand-amber/15 text-brand-amber' : 'border-brand-emerald/20 bg-brand-emerald/10 text-brand-emerald'}`}>{receiptStatusLabel(row)}</span></td>
           <td className="hidden p-4 lg:table-cell"><div className="flex flex-wrap gap-1">{row.export_types.length ? row.export_types.map((type) => <span key={type} className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${type === '自营' ? 'border-slate-700 bg-slate-800 text-slate-300' : 'border-amber-500/20 bg-amber-500/10 text-amber-500'}`}>{type}</span>) : <span className="text-muted">—</span>}</div></td>
           <td className="hidden max-w-[200px] truncate p-4 text-slate-400 lg:table-cell" title={row.notes}>{row.notes || '-'}</td>
-          <td className="sticky right-0 z-10 min-w-[128px] bg-surface p-4 text-right"><div className="flex justify-end gap-1"><IconButton onClick={() => void handleCopyAccountingMessage(row)} label="复制会计入账文字" tone="primary" icon={<Copy className="w-3.5 h-3.5" />} /><IconButton onClick={() => handleOpenLedgerEdit(row)} disabled={Boolean(row.receipt_id && !row.receipt)} label="编辑整笔到账" icon={<Edit2 className="w-3.5 h-3.5" />} /><IconButton onClick={() => void handleDeleteLedgerRow(row)} disabled={Boolean(row.receipt_id && !row.receipt)} label="删除整笔到账" tone="danger" icon={<Trash2 className="w-3.5 h-3.5" />} /></div></td>
+          <td className="sticky right-0 z-10 min-w-[128px] bg-surface p-4 text-right"><div className="flex justify-end gap-1"><IconButton onClick={() => void handleCopyAccountingMessage(row)} label="复制会计入账文字" tone="primary" icon={<Copy className="w-3.5 h-3.5" />} /><IconButton requiresEdit onClick={() => handleOpenLedgerEdit(row)} disabled={Boolean(row.receipt_id && !row.receipt)} label="编辑整笔到账" icon={<Edit2 className="w-3.5 h-3.5" />} /><IconButton requiresEdit onClick={() => void handleDeleteLedgerRow(row)} disabled={Boolean(row.receipt_id && !row.receipt)} label="删除整笔到账" tone="danger" icon={<Trash2 className="w-3.5 h-3.5" />} /></div></td>
         </tr>
         {renderAllocationDetails(row, colSpan)}
       </React.Fragment>
@@ -652,7 +652,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
           ? '按客户汇总累计收款与累计发货，快速判断是我方待交货，还是客户待付款'
           : `按银行实际到账登记资金流水；默认显示本财年（${fiscalRange.label}），历史收款可在历史财年中查看`}
         actions={viewMode === 'balance' ? undefined : (
-          <Button
+          <Button requiresEdit
             onClick={handleOpenAdd}
             icon={<Plus className="h-4 w-4" />}
           >
@@ -1027,7 +1027,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
                         ? <div className="text-[10px] text-muted">该合同本次收款前剩余应收：<span className="font-semibold text-body">{allocationContract?.currency === 'USD' ? '$' : '￥'}{contractOutstanding.toLocaleString()}</span></div>
                         : <div className="text-[10px] font-semibold text-brand-amber">合同金额待联系单形成，可先登记到账；回款率将在金额形成后自动计算。</div>)}
                       {allocation.id && editingReceiptId && (
-                        <Button type="button" size="sm" tone="secondary" onClick={() => void handleReturnAllocationToDeposit(allocation.id!)}>
+                        <Button requiresEdit type="button" size="sm" tone="secondary" onClick={() => void handleReturnAllocationToDeposit(allocation.id!)}>
                           退回预存款
                         </Button>
                       )}
@@ -1080,7 +1080,7 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
                 >
                   取消
                 </Button>
-                <Button
+                <Button requiresEdit
                   type="submit"
                   disabled={isSaving || !formCustomerId || paymentAllocations.some((row) => !row.contract_id || row.amount <= 0) || receiptTotalAmount <= 0 || unallocatedAmount < -0.005}
                 >

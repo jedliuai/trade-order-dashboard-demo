@@ -1,3 +1,4 @@
+import { isReadOnlySession } from '../services/localClient';
 import React, { useState, useMemo, useEffect } from 'react';
 import { db } from '../services/dataStore';
 import type { ContactSheet, ContactSheetChangeHistory } from '../services/dataStore';
@@ -1099,7 +1100,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
             >
               {groupByCustomer ? '返回录入日期排序' : '按客户分组查看'}
             </Button>
-            <Button
+            <Button requiresEdit
               onClick={handleOpenAdd}
               icon={<Plus className="h-4 w-4" />}
             >
@@ -1332,7 +1333,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                               <ArrowUpRight className="h-3.5 w-3.5" />
                             </button>
                           ) : (
-                            <button
+                            <button data-edit-action disabled={isReadOnlySession()}
                               type="button"
                               onClick={(event) => { event.stopPropagation(); handleOpenEdit(s); }}
                               className="inline-flex items-center gap-1.5 rounded-md border border-brand-amber/30 bg-brand-amber/10 px-2.5 py-1.5 text-sm font-bold text-brand-amber transition-colors hover:bg-brand-amber/15"
@@ -1370,7 +1371,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                       <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
                         <StatusBadge tone={currentStage.tone} dot>{currentStage.label}</StatusBadge>
                         {boxArtworkStatus.applicable && (
-                          <Button
+                          <Button requiresEdit
                             onClick={() => { void handleToggleBoxArtworkConfirmation(s); }}
                             disabled={boxArtworkUpdatingId !== null}
                             tone={boxArtworkStatus.confirmed ? 'secondary' : boxArtworkStatus.due ? 'danger' : 'warning'}
@@ -1392,7 +1393,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                           </Button>
                         )}
                         <Button onClick={(event) => handleOpenHistory(s, event)} tone="warning" size="sm" icon={<History className="h-3.5 w-3.5" />}>历史回退</Button>
-                        <IconButton onClick={() => handleOpenEdit(s)} label="编辑联系单" icon={<Edit2 className="h-4 w-4" />} />
+                        <IconButton requiresEdit onClick={() => handleOpenEdit(s)} label="编辑联系单" icon={<Edit2 className="h-4 w-4" />} />
                       </div>
                     </div>
 
@@ -1456,11 +1457,11 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                       )}
                       <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
                         {!contractObj?.archived && (
-                          <IconButton onClick={(event) => { event.stopPropagation(); handleOpenCopy(s); }} label="复制联系单" tone="primary" icon={<Copy className="h-4 w-4" />} />
+                          <IconButton requiresEdit onClick={(event) => { event.stopPropagation(); handleOpenCopy(s); }} label="复制联系单" tone="primary" icon={<Copy className="h-4 w-4" />} />
                         )}
-                        <IconButton onClick={(event) => { event.stopPropagation(); void handleDelete(s.id); }} label="删除联系单" tone="danger" icon={<Trash2 className="h-4 w-4" />} />
+                        <IconButton requiresEdit onClick={(event) => { event.stopPropagation(); void handleDelete(s.id); }} label="删除联系单" tone="danger" icon={<Trash2 className="h-4 w-4" />} />
                         {s.business_type === '制剂' && (
-                          <Button onClick={() => handleOpenBatchEditor(s.id)} tone="secondary" size="sm" icon={<Layers className="h-3.5 w-3.5" />}>
+                          <Button requiresEdit onClick={() => handleOpenBatchEditor(s.id)} tone="secondary" size="sm" icon={<Layers className="h-3.5 w-3.5" />}>
                             管理批次
                           </Button>
                         )}
@@ -1842,7 +1843,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                   <Button type="button" onClick={() => { void requestCloseForm(); }} tone="secondary">
                     取消
                   </Button>
-                  <Button type="submit" disabled={isSaving}>
+                  <Button requiresEdit type="submit" disabled={isSaving}>
                     {isSaving ? '保存中...' : '确认保存'}
                   </Button>
                 </div>
@@ -1955,7 +1956,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                 >
                   取消
                 </Button>
-                <Button
+                <Button requiresEdit
                   onClick={handleSaveBatches}
                   disabled={isSaving}
                 >
@@ -2079,7 +2080,7 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                       }`}>
                         分摊率: {splitPercentage}% ({totalSplitQty.toLocaleString()} / {s.quantity.toLocaleString()})
                       </span>
-                      {s.business_type === '制剂' && <Button
+                      {s.business_type === '制剂' && <Button requiresEdit
                         onClick={() => {
                           setSelectedSheetDetail(null);
                           handleOpenBatchEditor(s.id);
@@ -2249,9 +2250,9 @@ export const ContactSheets: React.FC<ContactSheetsProps> = ({ onRefreshData, onR
                             物料 <span className="font-semibold text-slate-200">{String(entry.old_data.material_no || '未填写')}</span>
                           </div>
                         </div>
-                        <button
+                        <button data-edit-action
                           type="button"
-                          disabled={Boolean(restoringHistoryId)}
+                          disabled={isReadOnlySession() || (Boolean(restoringHistoryId))}
                           onClick={() => void handleRestoreHistory(entry)}
                           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-brand-amber/25 bg-brand-amber/10 px-3 py-2 font-bold text-brand-amber transition-colors hover:bg-brand-amber/20 disabled:opacity-50"
                         >

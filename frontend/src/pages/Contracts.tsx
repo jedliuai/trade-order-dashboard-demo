@@ -459,7 +459,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
         title="销售合同跟踪"
         description="管理自营与转口合同，聚合分析收款履约及交期进度"
         actions={(
-          <Button
+          <Button requiresEdit
             onClick={handleOpenAdd}
             icon={<Plus className="h-4 w-4" />}
           >
@@ -646,7 +646,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                       {exportingHelperContractId === c.id ? '导出中' : '联系单辅助表'}
                     </Button>
                   )}
-                  <Button
+                  <Button requiresEdit
                     onClick={(event) => handleQuickShipment(c, event)}
                     tone="subtle"
                     size="sm"
@@ -655,7 +655,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                   >
                     快捷发货
                   </Button>
-                  <Button
+                  <Button requiresEdit
                     onClick={(event) => handleQuickPayment(c, event)}
                     tone="secondary"
                     size="sm"
@@ -664,18 +664,18 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                   >
                     登记收款
                   </Button>
-                  <IconButton
+                  <IconButton requiresEdit
                     onClick={(e) => handleOpenCopy(c, e)}
                     label="复制合同"
                     tone="primary"
                     icon={<Copy className="w-3.5 h-3.5" />}
                   />
-                  <IconButton
+                  <IconButton requiresEdit
                     onClick={(e) => handleOpenEdit(c, e)}
                     label="编辑合同"
                     icon={<Edit2 className="w-3.5 h-3.5" />}
                   />
-                  <IconButton
+                  <IconButton requiresEdit
                     onClick={(e) => handleDelete(c.id, e)}
                     label="删除合同"
                     tone="danger"
@@ -899,7 +899,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                 >
                   取消
                 </Button>
-                <Button
+                <Button requiresEdit
                   type="submit"
                   disabled={isSaving}
                 >

@@ -74,7 +74,7 @@ export function CustomerOrderManager({ customers }: CustomerOrderManagerProps) {
           <h3 className="font-heading text-sm font-bold text-ink">客户下拉展示顺序</h3>
           <p className="mt-1 text-[11px] leading-5 text-muted">顺序保存在当前 本地数据库 账号中，换浏览器或设备登录后也会恢复；不会修改客户 ID、合同关联或历史业务数据。</p>
         </div>
-        <Button
+        <Button requiresEdit
           tone="secondary"
           size="sm"
           icon={<RotateCcw className="h-3.5 w-3.5" />}
@@ -108,25 +108,25 @@ export function CustomerOrderManager({ customers }: CustomerOrderManagerProps) {
                 <span className="block truncate text-sm font-medium text-ink">{customer.name}</span>
                 <span className="block truncate text-[10px] text-muted">{customer.country || '未设置国家'}</span>
               </span>
-              <IconButton
+              <IconButton requiresEdit
                 label={`直接置顶 ${customer.name}`}
                 icon={<ArrowUpToLine className="h-3.5 w-3.5" />}
                 onClick={() => moveCustomerToEdge(customer.id, 'top')}
                 disabled={isSaving || absoluteIndex <= 0}
               />
-              <IconButton
+              <IconButton requiresEdit
                 label={`上移 ${customer.name}`}
                 icon={<ArrowUp className="h-3.5 w-3.5" />}
                 onClick={() => moveCustomer(customer.id, -1)}
                 disabled={isSaving || absoluteIndex <= 0}
               />
-              <IconButton
+              <IconButton requiresEdit
                 label={`下移 ${customer.name}`}
                 icon={<ArrowDown className="h-3.5 w-3.5" />}
                 onClick={() => moveCustomer(customer.id, 1)}
                 disabled={isSaving || absoluteIndex >= orderedCustomers.length - 1}
               />
-              <IconButton
+              <IconButton requiresEdit
                 label={`直接移到底部 ${customer.name}`}
                 icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
                 onClick={() => moveCustomerToEdge(customer.id, 'bottom')}

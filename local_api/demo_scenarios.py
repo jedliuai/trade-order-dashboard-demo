@@ -1,6 +1,6 @@
 """Small, entirely invented business scenarios. Chart positions are never stored.
 
-Each sales scope has eight customers: two each with high/high, high/low,
+Each sales scope has twelve customers: three each with high/high, high/low,
 low/high and low/low receipts/profit. Real invoices, costs and receipts drive
 the existing analytics without changing any business calculation.
 """
@@ -9,6 +9,8 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from .store import SALES, SHARED, TABLES, normalize_validate
+from .organization import ACCOUNTS
+from .demo_catalog import enrich_catalog
 
 
 def build_compact_seed(base, as_of):
@@ -17,6 +19,15 @@ def build_compact_seed(base, as_of):
     for table in ('app_user_profiles', 'mdc_products', 'mdc_product_aliases', 'mdc_product_variants',
                   'packaging_profiles', 'packaging_profile_versions', 'exchange_rates', 'analysis_templates'):
         data[table] = copy.deepcopy(base[table])
+    enrich_catalog(data)
+    data['app_user_profiles'] = [dict(id='DEMO-PROFILE-' + a['id'], owner_id=SHARED,
+        user_id=a['id'], login_name=a['id'], display_name=a['name'], role=a['role'], app_role=a['role'],
+        region=a['region'], hierarchy_level=a['level'], manager_id=a['parentId'], reporting_to=a['parentId'],
+        is_active=True, created_at=as_of.isoformat() + 'T08:00:00+08:00',
+        updated_at=as_of.isoformat() + 'T08:00:00+08:00') for a in ACCOUNTS]
+    fourth_template = copy.deepcopy(data['analysis_templates'][0])
+    fourth_template.update(id='DEMO-TEMPLATE-4', owner_id=SALES[3])
+    data['analysis_templates'].append(fourth_template)
     for rate in data['exchange_rates']:
         rate.update(source='Manual', source_date=rate['effective_month'] + '-01',
                     notes='预置的纯虚构月度汇率，可手动修改；不读取外部行情。')
@@ -37,24 +48,29 @@ def build_compact_seed(base, as_of):
 
     names = ('青禾', '星舟', '云帆', '松岚', '晨露', '澄海', '月泉', '远山',
              '星野', '白榆', '晴川', '竹溪', '青穗', '南栀', '山岚', '云汀',
-             '明溪', '秋实', '朝晖', '清越', '望舒', '海棠', '映雪', '长风')
+             '明溪', '秋实', '朝晖', '清越', '望舒', '海棠', '映雪', '长风',
+             '知夏', '凌波', '听雨', '书澜', '锦川', '安澄', '若溪', '景和',
+             '逸舟', '云杉', '朝露', '竹影', '怀瑾', '青黛', '予安', '鹿鸣',
+             '临风', '松月', '霁川', '澄心', '微澜', '星河', '棠溪', '白露')
+    variants_by_product = {p: [v for v in data['mdc_product_variants'] if v['product_id'] == p] for p in products}
+    catalog = data['mdc_products']
     # Invented scenarios only; these are input prices/margins, never chart scores.
     prices = (20, 18, 16, 10)
     margins = (Decimal('.32'), Decimal('.04'), Decimal('.23'), Decimal('.09'))
     receipt_ratios = (Decimal('1.10'), Decimal('1.00'), Decimal('.12'), Decimal('.18'))
     for n, name in enumerate(names):
-        owner = SALES[n // 8]
+        owner = SALES[n // 12]
         q = n % 4
-        factor = Decimal('1.00') if n % 8 < 4 else Decimal('1.35')
-        currency = 'RMB' if n % 8 == 7 else 'USD'
+        factor = (Decimal('1.00'), Decimal('1.22'), Decimal('1.45'))[n % 12 // 4]
+        currency = 'RMB' if n % 12 == 11 else 'USD'
         customer = add('customers', f'DEMO-SC-CUSTOMER-{n + 1:02}', owner,
                        name='DEMO PACKAGING PARTNER' if n == 1 else f'虚构·{name}',
                        country=('肯尼亚', '秘鲁', '越南', '埃及')[q], default_currency=currency,
                        default_payment_terms='40%预付款，60%提单后付款', is_staggered_month=False,
                        expiry_years=3, notes='纯虚构演示客户，由本地场景生成器创建，不对应真实企业或个人。')
-        ratio = receipt_ratios[q] if n % 8 < 4 or q != 1 else Decimal('.95')
-        margin = Decimal('.12') if n % 8 == 7 else margins[q]
-        for offset in (0, -1, -5, -11, -17, -25):
+        ratio = receipt_ratios[q] if n % 12 < 4 or q != 1 else Decimal('.95')
+        margin = Decimal('.12') if n % 12 == 11 else margins[q]
+        for month_index, offset in enumerate((0, -1, -5, -11, -17, -25)):
             month_start = _month(as_of, offset)
             # All actual events remain within this month and no later than as_of.
             event_day = month_start + timedelta(days=min(18 + n % 7, (as_of - month_start).days))
@@ -75,17 +91,19 @@ def build_compact_seed(base, as_of):
                            shipment_no=group['shipment_no'], shipment_date=when, status='已发货',
                            incoterm_snapshot=contract['incoterm'], payment_check_status='需人工确认', notes='纯虚构发货事实')
             for line in range(2):
-                variant = data['mdc_product_variants'][(n * 3 + line) % len(data['mdc_product_variants'])]
+                product_index = (n * 7 + month_index * 5 + line * 3) % len(catalog)
+                choices = variants_by_product[catalog[product_index]['id']]
+                variant = choices[(n + month_index + line) % len(choices)]
                 product = products[variant['product_id']]
                 profile = profiles.get(variant['id'])
                 version = current_versions[profile['id']] if profile else None
                 raw = product['product_type'] == 'raw_material'
                 unit = 'kg' if raw else version['quantity_unit'].removesuffix('/箱')
                 price = Decimal(prices[q]) * factor * (Decimal('7.2') if currency == 'RMB' else 1)
-                quantity = 500 + line * 100
+                quantity = 500 + line * 100 + month_index * 35
                 sale = price * quantity
                 total += sale
-                material = f'DEMO-SC-M-{n + 1:02}-{line + 1}'
+                material = f'DEMO-SC-M-{n + 1:02}-{variant["id"]}'
                 sheet = add('contact_sheets', key + f'-CS{line}', owner, contract_id=contract['id'],
                             contact_sheet_no=key + f'-L{line + 1}', product_name=product['chinese_name'],
                             product_variant_id=variant['id'], specification=variant['specification'], material_no=material,
@@ -135,7 +153,8 @@ def build_compact_seed(base, as_of):
                        export_type='转口' if currency == 'RMB' else '自营', incoterm='FOB' if currency == 'USD' else None,
                        delivery_days=45, prepayment_ratio=.4, payment_terms=customer['default_payment_terms'],
                        is_historical=False, notes='纯虚构当前订单，供新增、排产、批次和发货演示。')
-        variant = data['mdc_product_variants'][n % 20 * 3]
+        finished = [p for p in catalog if p['product_type'] == 'finished_product']
+        variant = variants_by_product[finished[n % len(finished)]['id']][n % 3]
         product = products[variant['product_id']]
         profile = profiles[variant['id']]
         version = current_versions[profile['id']]

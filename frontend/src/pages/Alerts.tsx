@@ -377,14 +377,14 @@ export const Alerts: React.FC<AlertsProps> = ({ onNavigate, onRefreshData, onRef
                         ) : alert.status === '未处理' ? (
                           <>
                             <Button onClick={() => handleEnterProcessing(alert)} tone="secondary" size="sm" icon={<ArrowRight className="h-3.5 w-3.5" />}>进入处理</Button>
-                            <Button onClick={() => void handleUpdateStatus(alert.id, '已处理')} disabled={pendingAlertId !== null} tone="subtle" size="sm" icon={<Check className="h-3.5 w-3.5" />}>{pendingAlertId === alert.id ? '处理中' : '标记已解决'}</Button>
-                            <Button onClick={() => handleOpenSnooze(alert.id)} disabled={pendingAlertId !== null} tone="warning" size="sm" icon={<Clock3 className="h-3.5 w-3.5" />}>稍后提醒</Button>
-                            <Button onClick={() => void handleUpdateStatus(alert.id, '忽略')} disabled={pendingAlertId !== null} tone="secondary" size="sm" icon={<EyeOff className="h-3.5 w-3.5" />}>忽略</Button>
+                            <Button requiresEdit onClick={() => void handleUpdateStatus(alert.id, '已处理')} disabled={pendingAlertId !== null} tone="subtle" size="sm" icon={<Check className="h-3.5 w-3.5" />}>{pendingAlertId === alert.id ? '处理中' : '标记已解决'}</Button>
+                            <Button requiresEdit onClick={() => handleOpenSnooze(alert.id)} disabled={pendingAlertId !== null} tone="warning" size="sm" icon={<Clock3 className="h-3.5 w-3.5" />}>稍后提醒</Button>
+                            <Button requiresEdit onClick={() => void handleUpdateStatus(alert.id, '忽略')} disabled={pendingAlertId !== null} tone="secondary" size="sm" icon={<EyeOff className="h-3.5 w-3.5" />}>忽略</Button>
                           </>
                         ) : (
                           <>
-                            <Button onClick={() => void handleUpdateStatus(alert.id, '未处理')} disabled={pendingAlertId !== null} tone="secondary" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />}>恢复待办</Button>
-                            <IconButton onClick={() => void handleDeleteAlert(alert.id)} disabled={pendingAlertId !== null} label="删除提醒记录" tone="danger" icon={<Trash2 className="h-3.5 w-3.5" />} />
+                            <Button requiresEdit onClick={() => void handleUpdateStatus(alert.id, '未处理')} disabled={pendingAlertId !== null} tone="secondary" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />}>恢复待办</Button>
+                            <IconButton requiresEdit onClick={() => void handleDeleteAlert(alert.id)} disabled={pendingAlertId !== null} label="删除提醒记录" tone="danger" icon={<Trash2 className="h-3.5 w-3.5" />} />
                           </>
                         )}
                       </div>
@@ -411,7 +411,7 @@ export const Alerts: React.FC<AlertsProps> = ({ onNavigate, onRefreshData, onRef
             </FormField>
             <div className="flex justify-end gap-2">
               <Button onClick={() => setSnoozeAlertId(null)} tone="secondary">取消</Button>
-              <Button onClick={() => void handleSnooze()} disabled={!snoozeDate || pendingAlertId !== null} tone="warning" icon={<Clock3 className="h-4 w-4" />}>{pendingAlertId ? '保存中' : '确认稍后提醒'}</Button>
+              <Button requiresEdit onClick={() => void handleSnooze()} disabled={!snoozeDate || pendingAlertId !== null} tone="warning" icon={<Clock3 className="h-4 w-4" />}>{pendingAlertId ? '保存中' : '确认稍后提醒'}</Button>
             </div>
           </div>
         </Dialog>

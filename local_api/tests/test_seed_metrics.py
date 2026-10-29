@@ -280,10 +280,10 @@ class SeedTest(ModulesTest):
             self.assertTrue(profiles)
             self.assertTrue(all(p['packaging_code'] and p['version_id'] and p['quantity_unit'] in ('支/箱', '盒/箱', '瓶/箱') for p in profiles))
             users = store.query('app_user_profiles', user='demo-manager')
-            self.assertEqual({p['user_id'] for p in users}, {'demo-sales-1', 'demo-sales-2', 'demo-sales-3', 'demo-manager', 'demo-owner'})
+            self.assertEqual({p['user_id'] for p in users}, {'demo-sales-1', 'demo-sales-2', 'demo-manager'})
             self.assertTrue(all(p['display_name'] and p['login_name'] for p in users))
             profits = store.query('v_shipment_profit', user='demo-manager')
-            self.assertGreater(len(profits), 200)
+            self.assertEqual(len(profits), 288)
             self.assertTrue(any(p['profit'] is not None for p in profits))
             self.assertTrue(any(p['is_estimated_profit'] for p in profits))
 
