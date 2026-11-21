@@ -22,14 +22,9 @@ test('首页使用已确认的经营敞口文案并展示具体待办字段', ()
   assert.match(dashboard, /record\.product/);
 });
 
-test('首页财年进度明确使用连续螺旋表达多圈进度', () => {
-  assert.match(dashboard, /每 100% 为一圈/);
-  assert.match(dashboard, /沿同一条螺旋连续向外延伸/);
-  assert.match(dashboard, /<FiscalProgressRing/);
-  assert.match(dashboard, /const FISCAL_RING_COLOR = '#ad8557'/);
-  assert.match(dashboard, /const fiscalRingCapacity = Math\.max/);
-  assert.match(dashboard, /<FiscalProgressRing current=\{card\.current\} previous=\{card\.previous\} color=\{FISCAL_RING_COLOR\} sharedCapacityTurns=\{fiscalRingCapacity\}/);
-  assert.doesNotMatch(dashboard, /<FiscalProgressRing[^>]+color=\{card\.color\}/);
+test('财年进度环沿用各项指标的颜色并说明当前圈含义', () => {
+  assert.match(dashboard, /圆环显示当前圈进度/);
+  assert.match(dashboard, /<FiscalProgressRing current=\{card\.current\} previous=\{card\.previous\} color=\{card\.color\}/);
 });
 
 test('经营节奏趋势使用整数参照线且图例与柱子共用同一顺序', () => {

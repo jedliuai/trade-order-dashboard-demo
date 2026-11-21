@@ -20,7 +20,6 @@ import {
 } from 'recharts';
 import { FiscalProgressRing } from '../components/FiscalProgressRing';
 import { createNiceChartScale } from '../services/chartScale';
-import { calculateFiscalProgress } from '../services/fiscalProgress';
 import {
   calculateGrowthPercent,
   emptyDashboardPeriodMetrics,
@@ -63,8 +62,6 @@ const PRIORITY_TONES: Record<PriorityTone, string> = {
   blue: 'border-[#b8d2e4] bg-[#f0f7fb] text-[#3e708f]',
   green: 'border-[#b9d7c2] bg-[#eff8f1] text-[#467657]'
 };
-
-const FISCAL_RING_COLOR = '#ad8557';
 
 const TREND_SERIES = [
   { key: 'orders', label: '新增订单', color: '#ad8557' },
@@ -330,14 +327,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onRefreshTrigg
     { key: 'shipments' as const, title: '实际发货', color: '#a8624d', current: currentFiscal.shipments.amountRmb, previous: previousFiscal.shipments.amountRmb },
     { key: 'profit' as const, title: '已确认毛利', color: '#a17b30', current: currentFiscal.confirmedProfitRmb, previous: previousFiscal.confirmedProfitRmb }
   ];
-  const fiscalRingCapacity = Math.max(
-    2,
-    ...fiscalCards.map((card) => {
-      const percent = calculateFiscalProgress(card.current, card.previous).percent;
-      return Math.ceil(Math.max((percent || 0) / 100, 0.0001) - 1e-10);
-    })
-  );
-
   const trendData = useMemo(() => trendRanges.map(({ month, range }) => {
     const metrics = operatingMetrics[rangeKey(range)] || emptyDashboardPeriodMetrics();
     return {
@@ -431,23 +420,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, onRefreshTrigg
           })}
         </div>
 
-        <div className="pt-2">
+        <div className="@container pt-2">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h3 className="text-sm font-bold text-ink">本财年进度</h3>
               <p className="mt-1 text-[11px] text-muted">{fiscalRange.label}，当前累计与上一完整财年合计对比</p>
             </div>
-            <span className="text-[11px] text-subtle">每 100% 为一圈，进度沿同一条螺旋连续向外延伸</span>
+            <span className="text-[11px] text-subtle">每 100% 为一圈，圆环显示当前圈进度</span>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-3 grid gap-3 @min-[35rem]:grid-cols-2 @min-[70rem]:grid-cols-4">
             {fiscalCards.map((card) => (
               <article key={card.key} className="flex min-h-40 items-center justify-between gap-3 rounded-2xl border border-[#ded6cb] bg-[#fffdf9] p-4">
                 <div className="min-w-0">
                   <h4 className="text-xs font-semibold text-muted">{card.title}</h4>
-                  <div className="mt-2 font-heading text-xl font-extrabold" style={{ color: card.color }}>￥{formatWan(card.current)} 万</div>
+                  <div className="mt-2 whitespace-nowrap font-heading text-xl font-extrabold" style={{ color: card.color }}>￥{formatWan(card.current)}<small className="ml-1 text-xs">万</small></div>
                   <p className="mt-3 text-[10px] leading-4 text-subtle">上财年 ￥{formatWan(card.previous)} 万</p>
                 </div>
-                <FiscalProgressRing current={card.current} previous={card.previous} color={FISCAL_RING_COLOR} sharedCapacityTurns={fiscalRingCapacity} />
+                <FiscalProgressRing current={card.current} previous={card.previous} color={card.color} />
               </article>
             ))}
           </div>

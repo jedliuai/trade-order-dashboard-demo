@@ -5,19 +5,6 @@ export interface FiscalProgressSegments {
   activeLap: number;
 }
 
-export interface FiscalSpiralGeometry {
-  capacityTurns: number;
-  trackPath: string;
-  lapSegments: Array<{
-    lap: number;
-    path: string;
-    startTurn: number;
-    endTurn: number;
-  }>;
-  boundaryPoints: Array<{ lap: number; x: number; y: number }>;
-  endpoint: { x: number; y: number } | null;
-}
-
 export function calculateFiscalProgress(current: number, previous: number): FiscalProgressSegments {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0) {
     return { percent: null, completedLaps: 0, remainderPercent: 0, activeLap: 0 };
@@ -91,43 +78,12 @@ export function buildFiscalSpiralGeometry(
   progress: FiscalProgressSegments,
   size = 78,
   strokeWidth = 6,
-  sharedCapacityTurns?: number
-): FiscalSpiralGeometry {
-  const activeTurns = progress.percent === null ? 0 : progress.percent / 100;
-  // 始终保留两圈柔和轨迹，让第一圈和“超过 100% 后继续向外”的方向一眼可辨。
-  // 超过 200% 后再按实际需要扩展第三圈、第四圈。
-  const requiredTurns = Math.max(2, Math.ceil(Math.max(activeTurns, 0.0001) - 1e-10));
-  const capacityTurns = Math.max(requiredTurns, Math.floor(sharedCapacityTurns || 0));
-  const visibleTurns = Math.min(activeTurns, capacityTurns);
-  const endpointPoint = visibleTurns > 0
-    ? spiralPoint(visibleTurns, capacityTurns, size, strokeWidth)
-    : null;
-  const lapSegments = Array.from(
-    { length: Math.ceil(visibleTurns - 1e-10) },
-    (_, index) => {
-      const startTurn = index;
-      const endTurn = Math.min(index + 1, visibleTurns);
-      return {
-        lap: index + 1,
-        startTurn,
-        endTurn,
-        path: spiralPath(startTurn, endTurn, capacityTurns, size, strokeWidth)
-      };
-    }
-  );
-  const boundaryPoints = Array.from(
-    { length: Math.floor(visibleTurns + 1e-10) },
-    (_, index) => {
-      const lap = index + 1;
-      const point = spiralPoint(lap, capacityTurns, size, strokeWidth);
-      return { lap, x: point.x, y: point.y };
-    }
-  );
+): { trackPath: string; progressPath: string; endpoint: { x: number; y: number } | null } {
+  // The guide stays at the original size. Only the current lap needs a coloured stroke.
+  const turn = progress.remainderPercent / 100 || (progress.completedLaps > 0 ? 1 : 0);
   return {
-    capacityTurns,
-    trackPath: spiralPath(0, capacityTurns, capacityTurns, size, strokeWidth),
-    lapSegments,
-    boundaryPoints,
-    endpoint: endpointPoint ? { x: endpointPoint.x, y: endpointPoint.y } : null
+    trackPath: spiralPath(0, 2, 2, size, strokeWidth),
+    progressPath: turn > 0 ? spiralPath(0, turn, 2, size, strokeWidth) : '',
+    endpoint: turn > 0 ? spiralPoint(turn, 2, size, strokeWidth) : null
   };
 }
