@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { RefreshCw, Database, TrendingUp, Settings2, Menu } from 'lucide-react';
 import { initDataStore } from '../services/dataStore';
-import { DEMO_ACCOUNTS, getLocalSession, IS_PUBLIC_DEMO, setDemoAccount, IS_CLOUD_TRIAL, localRequest } from '../services/localClient';
+import { DEMO_ACCOUNTS, getLocalSession, IS_PUBLIC_DEMO, setDemoAccount, IS_CLOUD_TRIAL, isSharedTrial, localRequest } from '../services/localClient';
 import { useFeedback } from './FeedbackProvider';
 
 interface HeaderProps {
@@ -31,8 +31,8 @@ export const Header: React.FC<HeaderProps> = ({ title, currentRate, currentRateM
       <div className="flex min-w-0 items-center gap-3">
         <button type="button" aria-label="打开主导航" aria-controls="app-sidebar" onClick={onOpenMobileNav} className="rounded-lg p-2 text-body lg:hidden"><Menu className="h-5 w-5" /></button>
         <h1 className="truncate text-sm font-semibold text-ink">{title}</h1>
-        <span className="hidden items-center gap-1.5 rounded-full border border-brand-emerald/20 bg-brand-emerald/10 px-2.5 py-1 text-[10px] font-semibold text-brand-emerald xl:flex">
-          <Database className="h-3 w-3" />{IS_CLOUD_TRIAL ? '个人工作区' : (IS_PUBLIC_DEMO ? '公网只读演示' : '本地演示') + ' · 全部虚构'}
+        <span className={`${isSharedTrial() ? 'flex' : 'hidden xl:flex'} items-center gap-1.5 rounded-full border border-brand-emerald/20 bg-brand-emerald/10 px-2.5 py-1 text-[10px] font-semibold text-brand-emerald`}>
+          <Database className="h-3 w-3" />{isSharedTrial() ? '公开试用 · 共享可写' : IS_CLOUD_TRIAL ? '个人工作区' : (IS_PUBLIC_DEMO ? '公网只读演示' : '本地演示') + ' · 全部虚构'}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-1 sm:gap-3 text-xs">

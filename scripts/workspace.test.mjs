@@ -49,6 +49,27 @@ test('sessions isolate D1 reads and writes, reject stale tabs, and revoke on log
     assert.equal((await call(path, 'GET')).status, 401);
     assert.equal((await call(path, 'POST', {...b, 'X-Workspace':a['X-Workspace']}, '{}')).status, 401);
     assert.equal((await call(path, 'POST', {...a,origin:'https://elsewhere.example'}, '{}')).status, 403);
+    const demoId = 'shared-trial';
+    const publicPassword = crypto.randomUUID();
+    env.PUBLIC_TRIAL_PASSWORD = publicPassword;
+    sqlite.prepare('INSERT INTO workspaces(id,login_hash) VALUES(?,?)').run(demoId, 'public:trial');
+    const publicLogin = (username, password) => call('/api/login', 'POST', {}, new URLSearchParams({username, password}));
+    assert.equal((await publicLogin('test', 'invalid')).status, 401);
+    assert.equal((await publicLogin('someone', publicPassword)).status, 401);
+    const demoHeaders = async () => {
+      const response = await publicLogin('test', publicPassword);
+      assert.equal(response.status, 303);
+      return {cookie: response.headers.get('set-cookie').split(';')[0], 'X-Workspace': demoId};
+    };
+    const demoA = await demoHeaders();
+    const demoB = await demoHeaders();
+    assert.notEqual(demoA.cookie, demoB.cookie);
+    assert.ok((await call(path, 'POST', demoA, JSON.stringify({name:'shared sample'}))).ok);
+    assert.deepEqual(await (await call(path, 'GET', demoB)).json(), ['shared sample']);
+    assert.equal((await call(path, 'GET', {...demoB, 'X-Workspace': a['X-Workspace']})).status, 401);
+    assert.equal((await call(path, 'GET', {...a, 'X-Workspace': demoId})).status, 401);
+    assert.ok((await call('/api/logout', 'POST', demoA)).ok);
+    assert.equal((await call(path, 'GET', demoB)).status, 200);
     const writes = await Promise.all(['product-a','product-b'].map(name => call(path, 'POST', a, JSON.stringify({name}))));
     assert.ok(writes.every(r => r.ok));
     assert.deepEqual((await (await call(path, 'GET', a)).json()).sort(), ['product-a','product-b']);

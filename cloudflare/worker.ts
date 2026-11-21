@@ -2,6 +2,7 @@ import { login, loginPage, logout, register, session } from './accounts.ts';
 import { json, redirect, withSecurityHeaders } from './responses.ts';
 
 interface Env {
+  PUBLIC_TRIAL_PASSWORD?: string;
   ASSETS: Fetcher;
   BUSINESS: Fetcher;
   DB: D1Database;
@@ -79,11 +80,11 @@ async function route(request: Request, env: Env) {
     const limit = path === '/api/register' ? env.SIGNUP_LIMIT : env.AUTH_LIMIT;
     if (!(await limit.limit({key: ip})).success) return new Response('请求过于频繁，请一分钟后再试。', {status:429,headers:{'Retry-After':'60'}});
     const text = await boundedText(request, 1024);
-    return path === '/api/register' ? register(env.DB) : login(env.DB, text);
+    return path === '/api/register' ? register(env.DB) : login(env.DB, text, env.PUBLIC_TRIAL_PASSWORD);
   }
   if (['GET','HEAD'].includes(method) && isStaticAsset(path)) return env.ASSETS.fetch(request);
   const current = await session(request, env.DB);
-  if (path === '/login' && method === 'GET') return current ? redirect('/') : loginPage();
+  if (path === '/login' && method === 'GET') return current ? redirect('/') : loginPage(env.PUBLIC_TRIAL_PASSWORD);
   if (!current) return path.startsWith('/api/') ? json({message:'请先登录'}, 401) : redirect('/login');
   if (path.startsWith('/api/')) {
     // Pin the open tab to its original account even if another tab signs in.

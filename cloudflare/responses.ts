@@ -61,6 +61,9 @@ export function accountPage(content: string, status = 200): Response {
     main { width: min(100%, 420px); padding: 32px; border: 1px solid #ded8cc; border-radius: 20px; background: rgba(255,255,255,.96); box-shadow: 0 18px 50px rgba(31,45,61,.12); }
     .eyebrow { margin: 0 0 8px; color: #087f5b; font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
     h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+    h2 { margin: 22px 0 0; font-size: 18px; }
+    details { margin-top: 22px; border-top: 1px solid #ded8cc; padding-top: 16px; }
+    summary { cursor: pointer; font-weight: 700; }
     .hint { margin: 12px 0 24px; color: #617083; line-height: 1.7; }
     label { display: block; margin: 14px 0 6px; font-weight: 700; }
     input { width: 100%; padding: 12px 14px; border: 1px solid #c9c4bb; border-radius: 10px; background: #fff; color: inherit; font: inherit; }

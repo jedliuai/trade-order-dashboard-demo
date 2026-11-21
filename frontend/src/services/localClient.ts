@@ -21,6 +21,10 @@ export function workspaceId() {
   return document.querySelector<HTMLMetaElement>('meta[name="desk-workspace"]')?.content || '';
 }
 
+export function isSharedTrial() {
+  return IS_CLOUD_TRIAL && workspaceId() === 'shared-trial';
+}
+
 const accountKey = 'trade-demo-account';
 export type DemoSession = {
   user: { id: string; email: string; app_metadata: { app_role: 'member' | 'leader'; login_name: string; display_name: string } };

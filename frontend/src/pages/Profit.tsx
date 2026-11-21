@@ -12,6 +12,7 @@ import { DataTable } from '../components/DataTable';
 import { PaginationControls } from '../components/PaginationControls';
 import { usePagedRows } from '../hooks/usePagedRows';
 import { getBusinessStatusTone } from '../services/statusPresentation';
+import { isSharedTrial } from '../services/localClient';
 import { getFiscalYearRange } from '../services/fiscalYear';
 import {
   filterProfitWorkspace,
@@ -31,7 +32,15 @@ interface ProfitProps {
 const formatMonth = (month: string) => month ? `${month.slice(0, 4)}年${month.slice(5, 7)}月` : '未确定';
 
 export const Profit: React.FC<ProfitProps> = ({ onRefreshTrigger }) => {
-  const fiscalRange = useMemo(() => getFiscalYearRange(), []);
+  const fiscalRange = useMemo(() => {
+    const current = getFiscalYearRange();
+    if (!isSharedTrial()) return current;
+    const months = db.getShipmentProfits().map(row => row.invoice_month).filter(Boolean).sort();
+    const latest = months.at(-1);
+    return latest && latest < current.startMonth
+      ? getFiscalYearRange(new Date(Number(latest.slice(0, 4)), Number(latest.slice(5)), 0, 12))
+      : current;
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFrom, setDateFrom] = useState(fiscalRange.startMonth);
   const [dateTo, setDateTo] = useState(fiscalRange.endMonth);
