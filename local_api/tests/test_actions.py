@@ -28,6 +28,20 @@ class ActionTest(unittest.TestCase):
         except ModuleNotFoundError as error:
             self.fail(f'Missing RPC implementation: {error}')
 
+    def test_product_and_children_are_saved_together(self):
+        fields = dict(product_type='finished_product', chinese_name='虚构产品', status='active')
+        args = dict(product_id=None, fields=fields, aliases=[dict(alias='虚构别名')],
+                    variants=[dict(specification='5g'), dict(specification='5g')])
+        before = self.store.snapshot()
+        with self.assertRaises(ApiError):
+            self.rpc('save_mdc_product', **args)
+        self.assertEqual(self.store.snapshot(), before)
+        args['variants'].pop()
+        product = self.rpc('save_mdc_product', **args)
+        result = self.store.snapshot()
+        for table in ('mdc_product_variants', 'mdc_product_aliases'):
+            self.assertEqual(sum(row['product_id'] == product['id'] for row in result[table]), 1)
+
     def item(self, quantity=40, sheet='cs', batch='b', price=10):
         return dict(contact_sheet_id=sheet, batch_id=batch,
                     shipped_quantity=quantity, unit_price=price)

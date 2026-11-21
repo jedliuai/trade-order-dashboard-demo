@@ -245,92 +245,38 @@ export async function loadMasterProducts(): Promise<MasterProduct[]> {
     });
 }
 
-export async function createMasterProduct(draft: ProductDraft): Promise<MasterProduct> {
+async function saveMasterProduct(draft: ProductDraft, id: string | null, aliases: string[]) {
   if (draft.dosage_form && !isAllowedDosageForm(draft.dosage_form)) {
     throw new Error('剂型只能从标准剂型列表中选择。');
   }
-  const userId = currentUserId();
-  const createdRows = await localRest<MasterProduct[]>('mdc_products', {
+  const specifications = uniqueSpecifications(draft.specifications);
+  const initialVariants = id ? [] : (specifications.length ? specifications : ['']);
+  return localRest<MasterProduct>('rpc/save_mdc_product', {
     method: 'POST',
     body: JSON.stringify({
-      product_type: productTypeToCode(draft.product_type),
-      chinese_name: draft.chinese_name.trim(),
-      english_name: draft.english_name.trim() || null,
-      dosage_form: draft.dosage_form.trim() || null,
-      status: statusToCode(draft.status),
-      source: 'manual',
-      notes: draft.notes.trim(),
-      created_by: userId,
-      updated_by: userId
+      product_id: id,
+      fields: {
+        product_type: productTypeToCode(draft.product_type),
+        chinese_name: draft.chinese_name.trim(),
+        english_name: draft.english_name.trim() || null,
+        dosage_form: draft.dosage_form.trim() || null,
+        status: statusToCode(draft.status),
+        notes: draft.notes.trim()
+      },
+      aliases: aliases.map(alias => ({alias, alias_kind: 'trade', language: 'zh'})),
+      variants: initialVariants.map(specification => ({specification, status: 'active'}))
     })
   });
-  const product = unwrapOne(createdRows);
-  try {
-    const aliases = uniqueLines(draft.aliases);
-    if (aliases.length) {
-      await localRest('mdc_product_aliases', {
-        method: 'POST',
-        body: JSON.stringify(aliases.map((alias_name) => ({
-          product_id: product.id,
-          alias: alias_name,
-          alias_kind: 'trade',
-          language: 'zh',
-          created_by: userId
-        })))
-      });
-    }
-    const specifications = uniqueSpecifications(draft.specifications);
-    await localRest('mdc_product_variants', {
-      method: 'POST',
-      body: JSON.stringify((specifications.length ? specifications : ['']).map((specification) => ({
-        product_id: product.id,
-        specification,
-        dosage_form_override: draft.dosage_form.trim() || null,
-        status: 'active',
-        created_by: userId,
-        updated_by: userId
-      })))
-    });
-  } catch (error) {
-    await localRest(`mdc_products?id=eq.${product.id}`, { method: 'DELETE' }).catch(() => undefined);
-    throw error;
-  }
-  return product;
+}
+
+export function createMasterProduct(draft: ProductDraft): Promise<MasterProduct> {
+  return saveMasterProduct(draft, null, uniqueLines(draft.aliases));
 }
 
 export async function updateMasterProduct(id: string, draft: ProductDraft, existing: MasterProduct) {
-  if (draft.dosage_form && !isAllowedDosageForm(draft.dosage_form)) {
-    throw new Error('剂型只能从标准剂型列表中选择。');
-  }
-  const userId = currentUserId();
-  await localRest(`mdc_products?id=eq.${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      product_type: productTypeToCode(draft.product_type),
-      chinese_name: draft.chinese_name.trim(),
-      english_name: draft.english_name.trim() || null,
-      dosage_form: draft.dosage_form.trim() || null,
-      status: statusToCode(draft.status),
-      notes: draft.notes.trim(),
-      updated_by: userId
-    })
-  });
-
-  const existingAliases = new Set(existing.aliases.map((item) => item.alias.trim().toLowerCase()));
-  const newAliases = uniqueLines(draft.aliases).filter((value) => !existingAliases.has(value.toLowerCase()));
-  if (newAliases.length) {
-    await localRest('mdc_product_aliases', {
-      method: 'POST',
-      body: JSON.stringify(newAliases.map((alias_name) => ({
-        product_id: id,
-        alias: alias_name,
-        alias_kind: 'trade',
-        language: 'zh',
-        created_by: userId
-      })))
-    });
-  }
-
+  const existingAliases = new Set(existing.aliases.map(item => item.alias.trim().toLowerCase()));
+  const aliases = uniqueLines(draft.aliases).filter(alias => !existingAliases.has(alias.toLowerCase()));
+  await saveMasterProduct(draft, id, aliases);
 }
 
 function assertUniqueActiveSpecification(product: MasterProduct, specification: string, excludeVariantId?: string) {

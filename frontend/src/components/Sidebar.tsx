@@ -1,3 +1,4 @@
+import { IS_CLOUD_TRIAL } from '../services/localClient';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
@@ -211,7 +212,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, alertCount
               <div className={`px-4 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-subtle ${collapsed ? 'lg:hidden' : ''}`}>
                   {group.label}
               </div>
-              {group.items.map((item) => {
+              {group.items.filter(item => !IS_CLOUD_TRIAL || item.id !== 'exports').map((item) => {
                 const Icon = item.icon;
                 const isActive = currentTab === item.id;
                 return (

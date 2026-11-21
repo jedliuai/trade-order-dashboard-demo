@@ -7,37 +7,30 @@
 <p><strong>告别反复填表 · 打通订单全链路 · 看清自己的业务全局</strong></p>
 <p>TRADE TRACKER · 从跟进订单，到理解业务</p>
 
-<p><a href="https://deskdemo.jedliuai.com"><img src="https://img.shields.io/badge/立即在线体验-进入驾驶舱-2563EB?style=for-the-badge&amp;logo=cloudflare&amp;logoColor=white" alt="立即在线体验" /></a> <img src="https://img.shields.io/badge/全部业务数据-纯虚构-0D9488?style=for-the-badge" alt="全部业务数据纯虚构" /> <img src="https://img.shields.io/badge/公网演示-只读体验-7C3AED?style=for-the-badge" alt="公网演示只读体验" /></p>
+<p><a href="https://deskdemo.jedliuai.com"><img src="https://img.shields.io/badge/立即在线体验-进入驾驶舱-2563EB?style=for-the-badge&amp;logo=cloudflare&amp;logoColor=white" alt="立即在线体验" /></a> <img src="https://img.shields.io/badge/本地样例-纯虚构-0D9488?style=for-the-badge" alt="本地样例纯虚构" /> <img src="https://img.shields.io/badge/公网试用-个人工作区-7C3AED?style=for-the-badge" alt="公网个人工作区" /></p>
 
 </div>
 
 ## 💻 最新本地版 · 2026-10-29
 
-已移植原项目截至 2026-10-21 的最新功能：整笔收款与合同分配、累计预付款进度、发货计划编辑与作废复制、包装体积与车间版本，以及新增三类导出。**APS 同步已移除，数据使用本机 SQLite；本轮没有更新公网体验站。**
+已移植原项目截至 2026-10-21 的最新功能：整笔收款与合同分配、累计预付款进度、发货计划编辑与作废复制、包装体积与车间版本，以及新增三类导出。**APS 同步已移除，数据使用本机 SQLite。**
 
 Windows 直接双击根目录的 **[启动本地演示.cmd](启动本地演示.cmd)**，自动打开 Microsoft Edge；运行期间保留启动窗口。首次运行如缺少依赖会自动安装，有源码更新时会自动构建。本机地址：[http://127.0.0.1:8765](http://127.0.0.1:8765)。也可使用 `npm run build` 后执行 `npm start`。
 
 [查看本次功能与运行说明](docs/2026-10-28-最新本地版移植说明.md)
 
-当前本地样例包含 **48 家虚构客户、33 个产品、99 个规格**，每位业务员 12 家客户、四象限各 3 家；新增用户指定的九种药品通用名并参与虚构交易。组织为 **老板 → 两位区域负责人 → 四位业务员**，上级逐级只读查看，业务员维护本人业务。汇率仅手动维护。本轮按要求只更新本地版，没有部署 Cloudflare。[查看本地启动与权限说明](docs/2026-10-29-本地启动与分层演示.md)
+当前本地样例包含 **48 家虚构客户、33 个产品、99 个规格**，每位业务员 12 家客户、四象限各 3 家；新增用户指定的九种药品通用名并参与虚构交易。组织为 **老板 → 两位区域负责人 → 四位业务员**，上级逐级只读查看，业务员维护本人业务。汇率仅手动维护。[查看本地启动与权限说明](docs/2026-10-29-本地启动与分层演示.md)
 
-## 🚀 在线体验 · 无需安装
+## 🚀 在线试用
 
-| 🌐 体验网址 | 👤 体验账号 | 🔑 体验密码 |
-| :---: | :---: | :---: |
-| **[https://deskdemo.jedliuai.com](https://deskdemo.jedliuai.com)** | **`test`** | **`test123456`** |
-
-> [!TIP]
-> **点击上方网址，登录就能体验。** 建议从首页开始，再看合同、发货与开票、收款流水和数据分析中心；也可以切换业务员、经理、老板身份，换个视角看同一套虚构业务。
->
-> 公网提供只读浏览、身份切换、汇报预览和样例报表下载；想体验新增、编辑等完整操作，可以运行下方的本地版本。
+打开 [个人订单驾驶舱](https://deskdemo.jedliuai.com)，点击“创建个人工作区”，把专属登录码保存到密码管理器。用同一个码可在其他设备继续使用，遗失后暂时无法找回。新工作区为空，可以从“产品主数据 → 新增产品”开始，也可以先建客户，再录入合同。
 
 <div align="center">
 <img src="docs/assets/readme-hero.svg" width="100%" alt="个人订单驾驶舱：一次录入、多次复用，从订单细节到经营全局，让业务数据流动起来" />
 </div>
 
 <p align="center">
-<img src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" /> <img src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 6" /> <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12 及以上" /> <img src="https://img.shields.io/badge/SQLite-本地持久化-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite 本地持久化" /> <img src="https://img.shields.io/badge/Cloudflare-公网只读-F38020?style=flat-square&amp;logo=cloudflare&amp;logoColor=white" alt="Cloudflare 公网只读" />
+<img src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" /> <img src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript 6" /> <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.12 及以上" /> <img src="https://img.shields.io/badge/SQLite-本地持久化-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite 本地持久化" /> <img src="https://img.shields.io/badge/Cloudflare-D1-F38020?style=flat-square&amp;logo=cloudflare&amp;logoColor=white" alt="Cloudflare D1" />
 </p>
 
 <p align="center">
@@ -54,7 +47,7 @@ Windows 直接双击根目录的 **[启动本地演示.cmd](启动本地演示.c
 
 把客户、合同、产品、数量、金额、发货、收款和利润串起来，让一笔订单从签订到履约、从回款到利润，都能沿着关联记录追踪。日常跟进有依据，经营分析有全局，需要报表时也能直接复用已录入的信息。
 
-本仓库提供可在本机完整运行的演示版本，以及一个无需安装的 Cloudflare 公网只读体验站。预置公司、客户、人员、合同和交易均为虚构演示数据。
+本仓库提供可在本机完整运行的演示版本，以及一个无需安装的 Cloudflare D1体验站。预置公司、客户、人员、合同和交易均为虚构演示数据。
 
 > **订单走到哪了？钱回来了吗？这笔业务赚了多少？**
 >
@@ -90,7 +83,7 @@ Windows 直接双击根目录的 **[启动本地演示.cmd](启动本地演示.c
 
 ## 🖼️ 界面预览 · 五个角度认识驾驶舱
 
-以下截图均使用 **Microsoft Edge** 从本项目的 **公网虚构演示站** 实际截取；图中客户、产品、订单、金额均为虚构数据。点击图片可查看大图。
+以下截图均使用 **Microsoft Edge** 从本项目的 **旧版虚构演示站** 实际截取；图中客户、产品、订单、金额均为虚构数据。点击图片可查看大图。
 
 ### ① 经营首页 · 打开就知道业务走到哪了
 
@@ -187,21 +180,14 @@ flowchart LR
 | **微观细节** | 某份合同、某条联系单、某个批次，目前有什么进展？ |
 | **宏观全局** | 把分散记录汇总起来后，整个业务的规模、结构和节奏是什么样子？ |
 
-顶栏提供 **三个业务员、经理、老板** 五个演示身份。业务员关注各自数据，经理和老板汇总查看；公网所有身份均为只读。
+## 🌐 云端试用与本地演示
 
-## 🌐 在线体验与本地完整演示
-
-| 能力 | 🌐 公网只读体验 | 💻 本地完整演示 |
-| :--- | :---: | :---: |
-| 首页指标、关联记录、多维分析 | ✅ | ✅ |
-| 五个演示身份切换 | ✅ | ✅ |
-| Excel / Word 报表 | ✅ 构建时生成的样例 | ✅ 按本地记录和筛选即时生成 |
-| Telegram 经营汇报预览 | ✅ | ✅ |
-| 新增、修改、删除业务记录 | — | ✅ |
-| SQLite 持久化、全库备份与重置 | — | ✅ |
-| Telegram 实际发送 | — | ✅ 本地配置后，手动确认发送 |
-
-公网快照由虚构种子重新生成，不读取本机 SQLite，也不连接 NAS、家庭网络或生产业务系统。
+| 能力 | 云端个人工作区 | 本地演示 |
+| --- | --- | --- |
+| 产品、客户、合同、联系单、发货、回款及分析 | 各账号独立录入 | 虚构样例，可编辑 |
+| 登录与范围 | 个人登录码，独立数据 | 虚构业务员及上级角色 |
+| 数据存储 | Cloudflare D1，每个工作区最多 1 MiB 业务记录 | 本机 SQLite |
+| Excel / Word 模板报表、Telegram、备份与演示重置 | 暂缓 | 本地可用 |
 
 <a id="quick-start"></a>
 
@@ -251,7 +237,7 @@ npm start
 
 设置页可以下载全库 JSON 备份。重置需要再次确认，会先自动保存快照，再按重置当天重新生成虚构数据库。当前没有一键导入备份按钮，删除或重建数据库前请保留备份。
 
-**本地十三类常用报表**使用程序生成的通用 Excel / Word 版式，公网仍保留既有十类静态样例：
+**本地十三类常用报表**使用程序生成的通用 Excel / Word 版式：
 
 | 订单与生产 | 财务与客户 | 发货与交付 |
 | :--- | :--- | :--- |
@@ -268,7 +254,7 @@ npm start
 
 未配置时可以预览本月、上月、财年的汇报，不能发送。配置后，仍需要在设置页明确点击并确认才发送；Bot 需已获接收人或群组允许发送消息。
 
-汇报只包含当前演示身份范围内的统计摘要，不会定时推送、不会自动同步，也不支持浏览器指定任意接收人。公网始终只允许预览。
+汇报只包含当前演示身份范围内的统计摘要，不会定时推送、不会自动同步，也不支持浏览器指定任意接收人。Telegram 汇报目前仅在本地版开放。
 
 </details>
 
@@ -281,14 +267,14 @@ npm start
 | **前端** | React、TypeScript、Vite、Tailwind CSS、Recharts |
 | **本地服务** | Python 标准库 HTTP 服务、SQLite 持久化 |
 | **报表生成** | openpyxl、python-docx |
-| **公网体验** | Cloudflare Worker、构建期虚构快照、静态资源 |
+| **公网体验** | Cloudflare Workers、D1、静态资源 |
 
 ```text
 trade-order-dashboard-demo/
 ├── frontend/        # 界面、图表与前端业务逻辑
 ├── local_api/       # 本地接口、SQLite、虚构数据与报表生成
-├── cloudflare/      # 公网登录入口与只读路由
-├── scripts/         # 安装、启动、构建与公网快照生成
+├── cloudflare/      # 公网登录、工作区路由和数据库迁移
+├── scripts/         # 安装、启动与构建
 ├── data/            # 可提交的虚构种子；运行库与备份被忽略
 ├── docs/            # 项目说明、介绍文案与本轮演示截图
 └── worklog/         # 每轮完整更新的中文工作记录
@@ -303,34 +289,26 @@ npm run build
 ```
 
 <details>
-<summary><strong>☁️ Cloudflare 公网只读版本的构建与部署</strong></summary>
+<summary><strong>☁️ Cloudflare 试用版部署</strong></summary>
 
-首次部署前，在项目根目录安装 Wrangler 等开发依赖：
+在根目录和 frontend 安装 npm 依赖，使用 Wrangler 登录目标账号。根配置绑定专用 D1 和业务 Worker。业务 Worker 只接受内部服务绑定调用。Windows 已验证使用 Node 22 LTS 部署。
 
 ```sh
 npm ci
-```
-
-准备自己的 Cloudflare 账号、域名和 Worker Secret，修改 `wrangler.jsonc` 中的 Worker 名称与自定义域名，再执行：
-
-```sh
+npm ci --prefix frontend
 npm run build:cloudflare
 npm run check:cloudflare
 npm run deploy:cloudflare
 ```
 
-`build:cloudflare` 按上海时区当天日期重新生成公网快照和样例报表，再构建前端。公网运行 Worker 与静态资源，不运行 Python / SQLite。新增、修改、删除、全库备份、重置和 Telegram 实际发送均由 Worker 拒绝。
-
-`DEMO_PASSWORD` 与 `AUTH_SECRET` 必须用 Wrangler Secret 配置，不能写入源码、配置或提交历史。上方公开体验账号仅用于本项目的只读演示站。
-
-生成目录 `frontend/public/.cloudflare-demo/`、`frontend/dist/` 和本机配置均不进入 Git。公网构建始终从虚构种子生成，不读取 `data/demo.sqlite3`。
+部署命令依次构建、应用 D1 迁移、发布私有业务 Worker 和公网入口。前端发布目录在 `.wrangler/trial-ui/`，仅含打包资源和项目品牌图标。登录码与会话均由服务端随机生成，数据库只保存其摘要。试用数据不进入 Git。
 
 </details>
 
 <details>
 <summary><strong>📌 演示范围与已有业务口径</strong></summary>
 
-所有预置业务数据均为虚构内容，请勿录入真实客户或业务数据。公开共享账号与顶栏身份切换用于演示，不提供生产级认证。
+本地预置业务数据和仓库截图均为虚构样例。线上用户录入的资料保存在各自工作区。
 
 本地服务只绑定 `127.0.0.1`，不要代理到公网或局域网。全库 JSON 备份与健康检查属于本机管理功能，不是按业务员隔离的生产权限接口。
 
@@ -346,5 +324,4 @@ npm run deploy:cloudflare
 <h3>少一点反复填表，多一点对业务的掌握。</h3>
 <p>从一笔订单开始，逐步看清自己的整个业务。</p>
 <p><a href="https://deskdemo.jedliuai.com"><strong>🚀 现在就去体验个人订单驾驶舱</strong></a></p>
-<p>体验账号：<code>test</code>　体验密码：<code>test123456</code></p>
 </div>

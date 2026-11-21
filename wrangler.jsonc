@@ -12,9 +12,41 @@
     }
   ],
   "assets": {
-    "directory": "./frontend/dist",
+    "directory": "./.wrangler/trial-ui",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    "not_found_handling": "none",
     "run_worker_first": true
-  }
+  },
+  "services": [
+    {
+      "binding": "BUSINESS",
+      "service": "deskdemo-business"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "deskdemo-workspaces",
+      "database_id": "089be710-0c4d-4322-a69e-78b5691e181e",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "AUTH_LIMIT",
+      "namespace_id": "24061",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "SIGNUP_LIMIT",
+      "namespace_id": "24062",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    }
+  ]
 }

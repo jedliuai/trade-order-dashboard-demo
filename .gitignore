@@ -10,6 +10,8 @@ __pycache__/
 # Secrets stay on this computer
 .env
 .env.*
+.dev.vars
+.dev.vars.*
 !.env.local.example
 *.env
 待处理.env

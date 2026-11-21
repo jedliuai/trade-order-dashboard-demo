@@ -1,3 +1,4 @@
+import { IS_CLOUD_TRIAL } from '../services/localClient';
 import React, { useState, useMemo } from 'react';
 import { db } from '../services/dataStore';
 import { useCallback, useEffect } from 'react';
@@ -575,6 +576,10 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
           }, itemsToShip);
       setShowAddModal(false);
       onRefreshData();
+      if (IS_CLOUD_TRIAL) {
+        notify({ message: '发货安排已保存', tone: 'success' });
+        return;
+      }
       if (missingMaterialSheets.length > 0) {
         notify({
           title: editingShipmentGroupId ? '安排已更新，物料号待补' : '发货安排已保存，物料号待补',
@@ -1083,7 +1088,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
           编辑安排
         </Button>
       )}
-      {shipment.shipment_group_id && shipment.status !== '取消' && (
+      {!IS_CLOUD_TRIAL && shipment.shipment_group_id && shipment.status !== '取消' && (
         <Button
           onClick={() => handleOpenShipmentExport(shipment.id)}
           tone="secondary"
@@ -1115,7 +1120,7 @@ export const Shipments: React.FC<ShipmentsProps> = ({ onRefreshData, onRefreshTr
           {shipment.invoice_state === 'invoiced' ? '修改开票' : '确认开票'}
         </Button>
       )}
-      {canExportReceiptConfirmation(shipment) && (
+      {!IS_CLOUD_TRIAL && canExportReceiptConfirmation(shipment) && (
         <Button
           onClick={() => void handleExportReceiptConfirmation(shipment.id)}
           tone="secondary"

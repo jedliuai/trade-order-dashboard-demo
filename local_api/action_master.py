@@ -1,7 +1,34 @@
 """Customer merges, product lifecycle and immutable packaging versions."""
 from decimal import Decimal
 from .store import ApiError, RELATIONS, now, normalize_specification, number
-from .action_common import object_data, owned, update, trimmed
+from .action_common import object_data, owned, row_list, update, trimmed
+
+
+def save_mdc_product(tx, product_id, fields, aliases, variants):
+    fields = object_data(fields, tx.user)
+    allowed = {'product_type', 'chinese_name', 'english_name', 'dosage_form', 'status', 'notes'}
+    if fields.keys() - allowed or fields.get('product_type') not in ('finished_product', 'raw_material'):
+        raise ApiError('产品字段或类型无效')
+    fields['chinese_name'] = trimmed(fields.get('chinese_name'), True)
+    if fields.get('status') not in ('active', 'inactive'):
+        raise ApiError('产品状态无效')
+    fields['updated_by'] = tx.user
+    if product_id is None:
+        product = tx.add('mdc_products', {**fields, 'created_by': tx.user, 'source': 'manual'})
+    else:
+        product = owned(tx, 'mdc_products', product_id)
+        update(product, fields)
+        if variants:
+            raise ApiError('已有产品的规格请单独维护')
+    child = {'product_id': product['id'], 'created_by': tx.user}
+    for item in row_list(aliases, tx.user, nonempty=False):
+        tx.add('mdc_product_aliases', {**child, 'alias': trimmed(item.get('alias'), True),
+                                       'alias_kind': 'trade', 'language': 'zh'})
+    for item in row_list(variants, tx.user, nonempty=product_id is None):
+        tx.add('mdc_product_variants', {**child, 'updated_by': tx.user, 'status': 'active',
+                                        'dosage_form_override': product.get('dosage_form'),
+                                        'specification': normalize_specification(item.get('specification', ''))})
+    return product
 
 
 def merge_customer_records(tx, source_customer_id, target_customer_id):

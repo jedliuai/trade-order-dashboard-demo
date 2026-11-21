@@ -981,7 +981,7 @@ export async function initDataStore(_force = false) {
     if (!isSameOwner) cache = emptyCache();
     const detail = error instanceof Error ? error.message : String(error);
     lastLoadError = isSameOwner
-      ? `本地数据刷新失败，页面暂时保留上次成功加载的数据：${detail}`
+      ? `业务数据刷新失败，页面暂时保留上次成功加载的数据：${detail}`
       : detail;
     throw error;
   }
@@ -1038,7 +1038,7 @@ async function refreshAfterConfirmedWrite(refreshAlerts = false) {
     errors.push(`页面刷新失败：${error instanceof Error ? error.message : String(error)}`);
   }
   if (errors.length > 0) {
-    lastLoadError = `业务数据已写入本地，但后续刷新未完整完成。${errors.join('；')}`;
+    lastLoadError = `业务数据已保存，但后续刷新未完整完成。${errors.join('；')}`;
   }
 }
 

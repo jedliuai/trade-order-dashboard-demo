@@ -20,7 +20,7 @@ WRITES = {fn.__name__: fn for fn in (
     finance.return_payment_allocation_to_deposit, finance.create_invoice_with_shipments,
     finance.update_invoice_with_shipments, finance.mark_physical_shipment_invoiced,
     finance.update_physical_shipment_invoice, finance.set_physical_shipment_freight,
-    master.merge_customer_records, master.revise_mdc_product_variant,
+    master.save_mdc_product, master.merge_customer_records, master.revise_mdc_product_variant,
     master.set_mdc_product_variant_status, master.set_mdc_product_display_order,
     master.create_packaging_profile_with_version, master.create_packaging_version,
     master.resolve_packaging_issue, refresh_alerts,

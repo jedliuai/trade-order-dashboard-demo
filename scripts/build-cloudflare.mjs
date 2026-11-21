@@ -1,59 +1,16 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
+import { cp, mkdir } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-
-const root = fileURLToPath(new URL('../', import.meta.url));
-const windows = process.platform === 'win32';
-const venvPython = path.join(root, '.venv', windows ? 'Scripts/python.exe' : 'bin/python');
-
-function shanghaiToday() {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
+const frontend = new URL('../frontend/', import.meta.url);
+const output = new URL('../.wrangler/trial-ui/', import.meta.url);
+const cwd = fileURLToPath(frontend);
+const env = { ...process.env, VITE_CLOUD_TRIAL: 'true', VITE_PUBLIC_DEMO: 'false' };
+const options = { cwd, env, stdio: 'inherit', windowsHide: true };
+execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-b'], options);
+execFileSync(process.execPath, ['node_modules/vite/bin/vite.js', 'build', '--outDir', fileURLToPath(output), '--emptyOutDir'], options);
+// Only publish these known assets alongside Vite's compiled application.
+await mkdir(new URL('brand/', output), { recursive: true });
+for (const file of ['icons.svg', 'favicon.svg', 'brand/trade-tracker-app-icon.svg', 'brand/trade-tracker-mark.svg']) {
+  await cp(new URL('public/' + file, frontend), new URL(file, output));
 }
-
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    cwd: root,
-    stdio: 'inherit',
-    windowsHide: true,
-    shell: false,
-    ...options
-  });
-  if (result.error) {
-    console.error(`无法启动 ${path.basename(command)}: ${result.error.message}`);
-    process.exit(result.status ?? 1);
-  }
-  if (result.status !== 0) process.exit(result.status ?? 1);
-}
-
-const asOf = shanghaiToday();
-const python = existsSync(venvPython) ? venvPython : (windows ? 'python' : 'python3');
-const output = path.join(root, 'frontend', 'public', '.cloudflare-demo');
-
-run(python, [
-  path.join(root, 'scripts', 'build_public_demo.py'),
-  '--output', output,
-  '--as-of', asOf
-]);
-
-const buildEnvironment = {
-  ...process.env,
-  VITE_PUBLIC_DEMO: 'true',
-  VITE_PUBLIC_DEMO_AS_OF_DATE: asOf
-};
-const npmArguments = ['--prefix', 'frontend', 'run', 'build'];
-if (process.env.npm_execpath) {
-  run(process.execPath, [process.env.npm_execpath, ...npmArguments], { env: buildEnvironment });
-} else {
-  run(windows ? 'npm.cmd' : 'npm', npmArguments, { env: buildEnvironment });
-}
-
-console.log(`Cloudflare 演示构建完成，截止日期：${asOf}`);

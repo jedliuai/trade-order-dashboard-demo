@@ -13,7 +13,6 @@ import json
 import math
 from pathlib import Path
 import re
-import sqlite3
 import unicodedata
 import uuid
 
@@ -308,6 +307,7 @@ class Store:
 
     @contextmanager
     def connection(self):
+        import sqlite3
         conn = sqlite3.connect(self.path, timeout=20)
         conn.execute('PRAGMA foreign_keys=ON')
         conn.execute('PRAGMA busy_timeout=20000')
@@ -366,6 +366,7 @@ class Store:
 
     @contextmanager
     def transaction(self, user=SALES[0]):
+        import sqlite3
         check_user(user, write=True)
         try:
             with self.connection() as conn:
@@ -379,6 +380,12 @@ class Store:
         except sqlite3.IntegrityError:
             raise ApiError('关联约束冲突，整笔操作已回滚', 409, 'integrity_error') from None
 
+    def table_rows(self, table, user):
+        with self.connection() as conn:
+            values = [json.loads(body) for (body,) in conn.execute(
+                'SELECT body FROM documents WHERE table_name=? ORDER BY rowid', (table,))]
+        return [row for row in values if visible(row, user, table)]
+
     def query(self, table, params=None, user=SALES[0]):
         check_user(user)
         if table not in (*TABLES, *VIEWS):
@@ -388,12 +395,7 @@ class Store:
         if table in VIEWS or any('(' in field for field in fields):
             rows = self.snapshot(user)
         else:
-            # One indexed, parameterized read avoids deserializing the entire
-            # demo graph for every ordinary table/page request.
-            with self.connection() as conn:
-                values = [json.loads(body) for (body,) in conn.execute(
-                    'SELECT body FROM documents WHERE table_name=? ORDER BY rowid', (table,))]
-            rows = {table: [row for row in values if visible(row, user, table)]}
+            rows = {table: self.table_rows(table, user)}
         if table == 'v_shipment_profit':
             from .metrics import shipment_profits
             result = shipment_profits(rows)

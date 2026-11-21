@@ -8,14 +8,14 @@
     "dev": "node scripts/local.mjs dev",
     "start": "node scripts/local.mjs start",
     "build": "npm --prefix frontend run build",
-    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "build:cloudflare": "node scripts/build-business.mjs && node scripts/build-cloudflare.mjs",
     "check:cloudflare": "wrangler deploy --dry-run",
-    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
+    "deploy:cloudflare": "npm run build:cloudflare && wrangler d1 migrations apply DB --remote && wrangler deploy -c cloudflare/business/wrangler.jsonc && wrangler deploy",
     "lint": "npm --prefix frontend run lint",
     "test": "npm run test:scripts && npm run test:frontend && npm run test:python",
     "test:frontend": "npm --prefix frontend test",
     "test:python": "node scripts/local.mjs test",
-    "test:scripts": "node --test scripts/*.test.mjs"
+    "test:scripts": "node --experimental-sqlite --experimental-strip-types --test scripts/*.test.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

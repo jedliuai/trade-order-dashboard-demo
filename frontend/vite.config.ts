@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  publicDir: process.env.VITE_CLOUD_TRIAL === 'true' ? false : 'public',
   plugins: [react(), tailwindcss()],
   server: {
     host: '127.0.0.1',

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Database, Download, RefreshCw, Send, ShieldCheck, ArrowRightLeft, Trash2 } from 'lucide-react';
 import { db, initDataStore } from '../services/dataStore';
-import { localRequest, downloadLocalFile, getCurrentAccountIdentity, DEMO_ACCOUNTS, getLocalSession, getScopeAccounts, IS_PUBLIC_DEMO, setDemoAccount } from '../services/localClient';
+import { localRequest, downloadLocalFile, getCurrentAccountIdentity, DEMO_ACCOUNTS, getLocalSession, getScopeAccounts, IS_PUBLIC_DEMO, IS_CLOUD_TRIAL, setDemoAccount } from '../services/localClient';
 import { formatLocalDate, formatLocalMonth } from '../services/dateUtils';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/Button';
@@ -15,7 +15,7 @@ const panelClass = 'rounded-2xl border border-border bg-surface p-6 shadow-sm';
 
 export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrigger }) => {
   const { confirm, notify } = useFeedback();
-  const [tab, setTab] = useState<'local' | 'telegram' | 'rates'>('local');
+  const [tab, setTab] = useState<'local' | 'telegram' | 'rates'>(IS_CLOUD_TRIAL ? 'rates' : 'local');
   const [busy, setBusy] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
@@ -24,11 +24,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
   const [mode, setMode] = useState('current_month');
   const [recipient, setRecipient] = useState<'manager' | 'owner'>(getLocalSession().user.id === 'demo-manager' ? 'owner' : 'manager');
   const [rateMonth, setRateMonth] = useState(formatLocalMonth());
-  const [rateValue, setRateValue] = useState('7.2000');
+  const [rateValue, setRateValue] = useState(IS_CLOUD_TRIAL ? '' : '7.2000');
   const identity = getCurrentAccountIdentity();
   const rates = useMemo(() => { void onRefreshTrigger; return [...db.getExchangeRates()].sort((a,b) => b.effective_month.localeCompare(a.effective_month)); }, [onRefreshTrigger]);
 
   useEffect(() => {
+    if (IS_CLOUD_TRIAL) return;
     let active = true;
     Promise.all([
       localRequest<{counts:Record<string,number>}>('health'),
@@ -78,25 +79,25 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
     event.preventDefault();
     await run(async () => {
       if (!Number.isFinite(Number(rateValue)) || Number(rateValue) <= 0) throw new Error('汇率必须大于 0。');
-      await db.saveExchangeRates([{id:crypto.randomUUID(), effective_month:rateMonth, currency_pair:'USD/CNY',rate:Number(rateValue),source_date:formatLocalDate(),source:'Manual',notes:'手工维护的演示汇率',created_at:new Date().toISOString()}]);
-      onRefreshData(); notify({title:'演示汇率已保存',message:rateMonth,tone:'success'});
+      await db.saveExchangeRates([{id:crypto.randomUUID(), effective_month:rateMonth, currency_pair:'USD/CNY',rate:Number(rateValue),source_date:formatLocalDate(),source:'Manual',notes:'手工维护的月度汇率',created_at:new Date().toISOString()}]);
+      onRefreshData(); notify({title:'月度汇率已保存',message:rateMonth,tone:'success'});
     });
   };
   const deleteRate = async (id:string, month:string) => {
-    if (!await confirm({title:'删除演示汇率？',message:`${month} 的相关换算将显示缺少汇率，确认继续？`,tone:'danger'})) return;
+    if (!await confirm({title:'删除月度汇率？',message:`${month} 的相关换算将显示缺少汇率，确认继续？`,tone:'danger'})) return;
     await run(async () => { await db.deleteExchangeRate(id); onRefreshData(); });
   };
   const countLabels:Record<string,string> = {customers:'虚构客户',contracts:'销售合同',contact_sheets:'联系单',batches:'生产批次',shipments:'发货记录',payment_receipts:'收款主单'};
 
   return <div className="mx-auto max-w-7xl space-y-6">
     <PageHeader
-      title={IS_PUBLIC_DEMO ? '公网演示设置与工作汇报' : '本地设置与工作汇报'}
-      description={IS_PUBLIC_DEMO
+      title={IS_CLOUD_TRIAL ? '工作区设置' : IS_PUBLIC_DEMO ? '公网演示设置与工作汇报' : '本地设置与工作汇报'}
+      description={IS_CLOUD_TRIAL ? '月度汇率仅用于当前工作区的金额换算。' : IS_PUBLIC_DEMO
         ? '这是与内网完全隔离的只读快照；所有公司、客户与金额均为虚构。'
         : '演示数据只保存在这台电脑；业务场景完整，所有公司、客户与金额均为虚构。'}
     />
     <div role="tablist" aria-label="本地设置分类" onKeyDown={handleTabListKeyDown} className="flex flex-wrap gap-2 border-b border-border pb-3">
-      {[{id:'local',name:'本地数据',icon:Database},{id:'telegram',name:'Telegram 汇报',icon:Send},{id:'rates',name:'手动汇率',icon:ArrowRightLeft}].map(item => {
+      {[{id:'local',name:'本地数据',icon:Database},{id:'telegram',name:'Telegram 汇报',icon:Send},{id:'rates',name:'手动汇率',icon:ArrowRightLeft}].filter(item => !IS_CLOUD_TRIAL || item.id === 'rates').map(item => {
         const Icon=item.icon;
         return <Button key={item.id} role="tab" id={`settings-tab-${item.id}`} aria-selected={tab===item.id} aria-controls={`settings-panel-${item.id}`} tabIndex={tab===item.id?0:-1} tone={tab===item.id?'primary':'secondary'} onClick={()=>setTab(item.id as typeof tab)} icon={<Icon className="h-4 w-4"/>}>{item.name}</Button>;
       })}
@@ -162,14 +163,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefreshData, onRefreshTrig
     </div>}
     {tab==='rates' && <section role="tabpanel" id="settings-panel-rates" aria-labelledby="settings-tab-rates" className={panelClass}>
       <h2 className="font-semibold text-ink">手动输入月度汇率</h2>
-      <p className="my-3 text-sm text-muted">按月份输入并保存 USD/CNY 汇率。预置数值均为虚构样例，可在这里修改；系统不连接任何汇率服务。</p>
+      <p className="my-3 text-sm text-muted">按月份输入并保存 USD/CNY 汇率。</p>
       {!identity.isReadOnly && <form onSubmit={event=>void saveRate(event)} className="my-5 flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-xs text-muted">生效月份<input aria-label="汇率月份" type="month" required value={rateMonth} onChange={event=>setRateMonth(event.target.value)} className={inputClass}/></label>
         <label className="grid gap-1 text-xs text-muted">USD/CNY<input aria-label="汇率数值" type="number" min="0.0001" step="0.0001" required value={rateValue} onChange={event=>setRateValue(event.target.value)} className={inputClass}/></label>
         <Button type="submit" disabled={busy}>保存月度汇率</Button>
       </form>}
-      <div className="max-h-[32rem] overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-surface-muted text-muted"><tr><th className="p-3">月份</th><th className="p-3">货币对</th><th className="p-3">演示汇率</th><th className="p-3">备注</th><th className="p-3">操作</th></tr></thead>
-        <tbody>{rates.map(rate=><tr key={rate.id} className="border-b border-border"><td className="p-3">{rate.effective_month}</td><td className="p-3">{rate.currency_pair}</td><td className="p-3 font-semibold">{rate.rate.toFixed(4)}</td><td className="p-3 text-muted">{rate.notes || '虚构演示汇率'}</td><td className="p-3">{!identity.isReadOnly && <button aria-label={`删除 ${rate.effective_month} 汇率`} disabled={busy} onClick={()=>void deleteRate(rate.id,rate.effective_month)} className="text-brand-rose"><Trash2 className="h-4 w-4"/></button>}</td></tr>)}</tbody>
+      <div className="max-h-[32rem] overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-surface-muted text-muted"><tr><th className="p-3">月份</th><th className="p-3">货币对</th><th className="p-3">月度汇率</th><th className="p-3">备注</th><th className="p-3">操作</th></tr></thead>
+        <tbody>{rates.map(rate=><tr key={rate.id} className="border-b border-border"><td className="p-3">{rate.effective_month}</td><td className="p-3">{rate.currency_pair}</td><td className="p-3 font-semibold">{rate.rate.toFixed(4)}</td><td className="p-3 text-muted">{rate.notes || '虚构月度汇率'}</td><td className="p-3">{!identity.isReadOnly && <button aria-label={`删除 ${rate.effective_month} 汇率`} disabled={busy} onClick={()=>void deleteRate(rate.id,rate.effective_month)} className="text-brand-rose"><Trash2 className="h-4 w-4"/></button>}</td></tr>)}</tbody>
       </table></div>
     </section>}
   </div>;

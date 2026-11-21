@@ -1,3 +1,4 @@
+import { IS_CLOUD_TRIAL } from '../services/localClient';
 import React, { useState, useMemo } from 'react';
 import { db } from '../services/dataStore';
 import { useEffect } from 'react';
@@ -882,14 +883,14 @@ export const Payments: React.FC<PaymentsProps> = ({ onNavigate, onRefreshData, o
                 <span>按客户分组查看</span>
               </label>
 
-              <button
+              {!IS_CLOUD_TRIAL && <button
                 onClick={() => void handleExportCustomerExcel()}
                 disabled={!exportablePaymentRowCount || isExporting}
                 className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-white/[0.04] transition-all font-semibold disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 {isExporting ? '正在生成 Excel…' : '导出当前明细 (Excel)'}
-              </button>
+              </button>}
             </div>
           </div>
 

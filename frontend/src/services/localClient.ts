@@ -15,6 +15,12 @@ export function getScopeAccounts(actorId: string): DemoAccount[] {
 
 export const IS_PUBLIC_DEMO = import.meta.env?.VITE_PUBLIC_DEMO === 'true';
 
+export const IS_CLOUD_TRIAL = import.meta.env?.VITE_CLOUD_TRIAL === 'true';
+
+export function workspaceId() {
+  return document.querySelector<HTMLMetaElement>('meta[name="desk-workspace"]')?.content || '';
+}
+
 const accountKey = 'trade-demo-account';
 export type DemoSession = {
   user: { id: string; email: string; app_metadata: { app_role: 'member' | 'leader'; login_name: string; display_name: string } };
@@ -22,6 +28,9 @@ export type DemoSession = {
 export type AccountIdentity = { loginName: string; displayName: string; role: 'member' | 'leader'; isReadOnly: boolean };
 
 export function getLocalSession(): DemoSession {
+  if (IS_CLOUD_TRIAL) return { user: { id: 'personal', email: '', app_metadata: {
+    app_role: 'member', login_name: 'personal', display_name: '我的工作区',
+  } } };
   const id = typeof window === 'undefined' ? null : window.localStorage.getItem(accountKey);
   const account = DEMO_ACCOUNTS.find(item => item.id === id) || DEMO_ACCOUNTS.find(item => item.id === 'demo-sales-1')!;
   return { user: { id: account.id, email: `${account.id}@example.invalid`, app_metadata: {
@@ -92,17 +101,23 @@ export async function localResponse(path: string, init: RequestInit = {}): Promi
   ));
   if (isReadOnlySession() && !readRequest) throw new Error('当前身份只读，请由所属业务员维护业务。');
   const headers = new Headers(init.headers);
-  headers.set('X-Demo-User', getLocalSession().user.id);
-  headers.set('X-Demo-Scope', getDemoScope().id);
+  if (IS_CLOUD_TRIAL) {
+    headers.set('X-Workspace', workspaceId());
+  } else {
+    headers.set('X-Demo-User', getLocalSession().user.id);
+    headers.set('X-Demo-Scope', getDemoScope().id);
+  }
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   let response: Response;
   try { response = await fetch(url, { ...init, headers, credentials: 'same-origin' }); }
   catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (IS_CLOUD_TRIAL) throw new Error('云端服务暂时无法连接，请重试。');
     throw new Error(IS_PUBLIC_DEMO
       ? '公网演示服务暂时无法连接，请刷新页面后重试。'
       : '本地服务无法连接，请确认已运行 npm run dev 或 npm start。');
   }
+  if (IS_CLOUD_TRIAL && response.status === 401) window.location.replace('/login');
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.message || payload.error || `本地请求失败（${response.status}）。`);

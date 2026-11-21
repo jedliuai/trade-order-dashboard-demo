@@ -1,4 +1,4 @@
-import { localRest, getLocalSession } from './localClient';
+import { localRest, getLocalSession, IS_CLOUD_TRIAL, workspaceId } from './localClient';
 import { sortCustomersForDisplay as sortCustomersForDisplayPure } from './customerOrderingSort';
 
 const LEGACY_CUSTOMER_ORDER_STORAGE_KEY = 'trade-tracker.customer-display-order.v1';
@@ -27,7 +27,7 @@ function currentOwnerId(): string | null {
 }
 
 function storageKey(ownerId: string) {
-  return `${CUSTOMER_ORDER_STORAGE_PREFIX}.${ownerId}`;
+  return `${CUSTOMER_ORDER_STORAGE_PREFIX}.${IS_CLOUD_TRIAL ? workspaceId() : ownerId}`;
 }
 
 function publishOrder(ownerId: string, order: string[]) {
@@ -62,6 +62,7 @@ export async function loadCustomerDisplayOrder(force = false): Promise<string[]>
       return order;
     }
 
+    if (IS_CLOUD_TRIAL) { publishOrder(ownerId, []); return []; }
     let legacyOrder: string[] = [];
     try {
       legacyOrder = normalizeOrder(JSON.parse(window.localStorage.getItem(LEGACY_CUSTOMER_ORDER_STORAGE_KEY) || '[]'));

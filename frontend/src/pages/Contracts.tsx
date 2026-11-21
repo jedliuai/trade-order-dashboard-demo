@@ -1,3 +1,4 @@
+import { IS_CLOUD_TRIAL } from '../services/localClient';
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/dataStore';
 import type { Contract } from '../services/dataStore';
@@ -633,7 +634,7 @@ export const Contracts: React.FC<ContractsProps> = ({ onRefreshData, onRefreshTr
                 </div>
 
                 <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()}>
-                  {activeTab === 'active' && (
+                  {!IS_CLOUD_TRIAL && activeTab === 'active' && (
                     <Button
                       onClick={(event) => void handleExportContactSheetHelper(c, event)}
                       tone="subtle"
